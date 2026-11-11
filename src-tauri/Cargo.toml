@@ -1,6 +1,6 @@
 [package]
 name = "picodj"
-version = "0.7.0"
+version = "0.8.0"
 description = "PicoDJ — DJ software for the home-made Raspberry Pi Pico controller"
 authors = ["Nguyên"]
 license = "GPL-2.0-or-later"

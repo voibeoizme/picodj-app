@@ -9,7 +9,7 @@ def R(a,b,count=1):
 src='<!doctype html>\n<html lang="vi">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'+src
 R('</style>\n','</style>\n</head>\n<body>\n')
 src=src.rstrip()+'\n</body>\n</html>\n'
-R('<small>PicoDJ v0.6.1</small>','<small>PicoDJ v0.7</small>')
+R('<small>PicoDJ v0.6.1</small>','<small>PicoDJ v0.8</small>')
 R('__LIBRARY__','{"tracks":[],"playlists":[]}')
 # ── native layer: folders + files ──
 R("""async function pickFolder(){ ensureAudio();
