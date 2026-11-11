@@ -1,6 +1,6 @@
-# Builds the PicoDJ Windows installer (.msi) on GitHub's servers.
-# Every push to main triggers a build; it can also be started by hand from the Actions tab ("Run workflow").
-# Download the result from the run page → Artifacts → "PicoDJ-Windows-Installer".
+# Builds the PicoDJ Windows installers on GitHub's servers (about 10 minutes).
+# Runs on every push to main, or by hand: Actions → "Build PicoDJ for Windows" → Run workflow.
+# Download from the run page → Artifacts → "PicoDJ-Windows" (.msi and setup .exe inside the zip).
 
 name: Build PicoDJ for Windows
 
@@ -18,70 +18,35 @@ concurrency:
 
 jobs:
   windows:
-    name: Windows installer (.msi)
-    runs-on: windows-2022
-    timeout-minutes: 300
-    env:
-      BUILDENV_BASEPATH: C:\buildenv
-      BUILDENV_RELEASE: TRUE
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
+          node-version: 22
+          cache: npm
 
-      - name: Set up CMake 3.21
-        uses: jwlawson/actions-setup-cmake@v2.2
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          cmake-version: "3.21.x"
+          workspaces: src-tauri
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Tauri CLI
+        run: npm ci
 
-      - name: Get build environment name
-        shell: cmd
-        run: tools\windows_buildenv.bat name
+      - name: Build installers
+        run: npx tauri build
 
-      - name: Cache prebuilt dependencies
-        uses: actions/cache@v4
-        with:
-          path: C:\buildenv
-          key: buildenv-${{ env.BUILDENV_NAME }}
-
-      - name: Set up build environment (Qt + libraries from the Mixxx project)
-        shell: cmd
-        run: tools\windows_buildenv.bat setup
-
-      - name: Configure
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force build | Out-Null
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-            -DBULK=ON -DFFMPEG=OFF -DHSS1394=ON -DLOCALECOMPARE=ON -DMAD=ON -DMEDIAFOUNDATION=ON `
-            -DMODPLUG=ON -DQT6=ON -DWAVPACK=ON -DVCPKG_TARGET_TRIPLET=x64-windows-release `
-            -DWARNINGS_FATAL=OFF -DDEBUG_ASSERTIONS_FATAL=OFF -DDOWNLOAD_MANUAL=OFF -DBUILD_TESTING=OFF -DBUILD_BENCH=OFF `
-            -DBATTERY=ON -DBROADCAST=ON -DHID=ON -DKEYFINDER=ON -DLILV=ON -DOPUS=ON -DQTKEYCHAIN=ON -DVINYLCONTROL=ON `
-            ..
-        env:
-          CC: cl
-          CXX: cl
-
-      - name: Build
-        working-directory: build
-        run: cmake --build . --config RelWithDebInfo
-        env:
-          CC: cl
-          CXX: cl
-
-      - name: Package (.msi)
-        working-directory: build
-        run: cpack -G WIX -C RelWithDebInfo
-
-      - name: Upload installer
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: PicoDJ-Windows-Installer
-          path: build/*.msi
+          name: PicoDJ-Windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 30

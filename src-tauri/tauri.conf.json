@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PicoDJ",
+  "version": "0.7.0",
+  "identifier": "vn.picodj.app",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "PicoDJ",
+        "width": 1600,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 576,
+        "center": true,
+        "backgroundColor": "#000000",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "category": "Music",
+    "shortDescription": "Phần mềm DJ cho bàn DJ tự chế Raspberry Pi Pico",
+    "longDescription": "PicoDJ: 2 deck, mixer, Beat FX, Color FX, phân tích BPM/key, import Rekordbox XML, điều khiển bằng bàn DJ MIDI tự chế.",
+    "copyright": "GPL-2.0-or-later",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "languages": ["Vietnamese", "English"], "displayLanguageSelector": false }
+    }
+  }
+}

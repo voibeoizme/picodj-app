@@ -1,48 +1,42 @@
 # PicoDJ
 
-Phần mềm DJ cho **bàn DJ tự chế dùng Raspberry Pi Pico** (firmware ở repo [`picodj`](https://github.com/voibeoizme/picodj)).
+Phần mềm DJ nhẹ cho **bàn DJ tự chế dùng Raspberry Pi Pico** (firmware ở repo [`picodj`](https://github.com/voibeoizme/picodj)).
 
-PicoDJ được xây trên mã nguồn **[Mixxx](https://mixxx.org) 2.5.6**, phần mềm DJ mã nguồn mở. Engine âm thanh, phân tích BPM/key, hiệu ứng và thư viện nhạc lấy từ Mixxx. PicoDJ bổ sung:
+- **2 deck**: Play/Cue (giữ Cue để nghe thử), Sync, Master, tempo ±6/10/16 %, jog, hot cue A–H, auto loop, quantize.
+- **Mixer**: Trim, EQ 3 băng (−26 dB … +6 dB), fader có đồng hồ mức tín hiệu, crossfader có gán kênh A/B.
+- **FX**: mỗi bên FX1/FX2 có 3 slot (Delay, Echo, Spiral, Reverb, Flanger) cộng Vinyl Brake. Color FX có Filter, Dub Echo, Space, Crush, Noise.
+- **Thư viện**: nhiều thư mục nhạc, playlist riêng, **import Rekordbox XML** (gồm beatgrid, hot cue và playlist), đọc tag ID3 kèm ảnh bìa, rating, tìm kiếm, sắp xếp.
+- **Phân tích**: BPM và beatgrid, key theo Camelot, waveform 3 băng tần.
+- **Bàn DJ**: nhận mọi thiết bị MIDI, tự kết nối lại khi cắm lại. Có sẵn đèn LED cho Play/Cue/Sync/FX khi bàn có đèn.
 
-- mapping cho bàn **Bàn DJ ver 2** (`res/controllers/PicoDJ Ban DJ ver 2.midi.xml` và `PicoDJ-scripts.js`), có sẵn phần đèn LED cho bàn ver 3;
-- quy trình build tự động ra file cài Windows (`.github/workflows/build-windows.yml`);
-- *(đang làm)* skin giao diện PicoDJ theo bố cục Rekordbox 6, import thư viện Rekordbox XML.
+Ứng dụng viết bằng [Tauri 2](https://tauri.app): phần giao diện ở `ui/index.html`, phần native viết bằng Rust ở `src-tauri/` (lo MIDI, quét thư mục, đọc file). File cài chỉ vài MB và dùng WebView2 có sẵn trong Windows 10/11.
 
 ## Tải bản cài Windows
 
-1. Vào tab **Actions** của repo → chọn lần chạy **Build PicoDJ for Windows** mới nhất có dấu ✅.
-2. Kéo xuống mục **Artifacts** → tải **PicoDJ-Windows-Installer** (file `.zip`, bên trong là file `.msi`).
-3. Giải nén và chạy file `.msi`. Bản build chưa được ký số, nên Windows SmartScreen có thể cảnh báo: bấm **More info → Run anyway**.
+1. Vào tab **Actions** → chọn lần chạy **Build PicoDJ for Windows** mới nhất có dấu ✅.
+2. Ở mục **Artifacts**, tải **PicoDJ-Windows** (file `.zip`).
+3. Trong file zip có hai bản cài, dùng bản nào cũng được: `PicoDJ_x.y.z_x64-setup.exe` hoặc `PicoDJ_x.y.z_x64_en-US.msi`.
+4. Bản build chưa được ký số, nên Windows SmartScreen có thể cảnh báo: bấm **More info → Run anyway**.
 
-Muốn build lại bằng tay: tab **Actions** → **Build PicoDJ for Windows** → **Run workflow**. Mỗi lần build mất khoảng 1–1,5 giờ.
+## Dùng lần đầu
 
-## Dùng bàn DJ với PicoDJ
+1. Bấm **THƯ MỤC NHẠC** trên thanh trên cùng để thêm thư mục nhạc. Thêm được nhiều thư mục, app nhớ lại ở lần mở sau.
+2. *(Tuỳ chọn)* Bấm **IMPORT XML**, chọn file Rekordbox xuất từ **File → Export Collection in xml format**.
+3. Cắm bàn DJ qua USB: chữ **MIDI** chuyển sang màu xanh là app đã nhận bàn.
+4. **F11** để bật/tắt toàn màn hình.
 
-1. Cắm bàn vào máy tính qua USB.
-2. Mở PicoDJ → **Options → Preferences → Controllers** → chọn thiết bị MIDI của bàn ở cột trái.
-3. Ở mục **Load Mapping**, chọn **PicoDJ Bàn DJ ver 2** → tick **Enabled** → **Apply**.
+## Phát triển
 
-| Phần cứng | MIDI | Chức năng |
-|---|---|---|
-| Nút 0 / 4 | Note 60 / 64 | Pitch Bend − (deck 1 / 2) |
-| Nút 13 / 14 | Note 73 / 74 | Pitch Bend + |
-| Nút 1 / 5 | Note 61 / 65 | Sync |
-| Nút 2 / 8 | Note 62 / 68 | Cue (giữ để nghe thử) |
-| Nút 3 / 9 | Note 63 / 69 | Play / Pause |
-| Nút 6 / 7 | Note 66 / 67 | Load bài đang chọn |
-| MUX CH0–2 / CH4–6 | CC10–12 / CC14–16 | EQ High / Mid / Low |
-| MUX CH3 / CH7 | CC13 / CC17 | Color FX (Quick Effect) |
-| Fader 1 / 2 | CC22 / CC23 | Channel fader |
-| Nút 10 | Note 70 | Đổi Color FX |
-| MUX CH9 + Nút 12 | CC19 + Note 72 | FX1 hiệu ứng 1: mức / bật-tắt |
-| MUX CH8 + Nút 11 | CC18 + Note 71 | FX2 hiệu ứng 1: mức / bật-tắt |
-| Encoder EC11 | CC30 (1 / 127) | Cuộn thư viện |
-| Nút encoder | Note 75 | Chuyển giữa cây thư mục và danh sách bài |
+```bash
+npm install
+npx tauri dev      # chạy thử
+npx tauri build    # tạo bản cài
+```
 
-> **Bluetooth MIDI (Pico W):** Windows chưa tự nhận BLE MIDI cho các app dùng WinMM. Tạm thời dùng USB, hoặc dùng cầu nối như *MIDIberry* + *loopMIDI*.
+Lộ trình: chuyển engine âm thanh sang Rust (cpal) để có độ trễ thấp hơn và giữ tông khi đổi tempo; viết lại thuật toán EQ, filter, beat detection và key detection theo [Mixxx](https://github.com/mixxxdj/mixxx); làm bản Android.
 
 ## Giấy phép
 
-PicoDJ là bản phái sinh của Mixxx nên dùng giấy phép **GNU GPL phiên bản 2 trở lên** (xem `LICENSE`). Dùng cá nhân thì thoải mái. Nếu phát hành bản build cho người khác, bạn phải cung cấp kèm mã nguồn (repo này) theo GPL.
+GPL-2.0-or-later. Các thuật toán chuyển từ Mixxx giữ nguyên giấy phép GPL của Mixxx.
 
-Mọi công lao về engine thuộc về đội ngũ Mixxx. README gốc của Mixxx nằm ở [`README.mixxx.md`](README.mixxx.md).
+Bản fork Mixxx làm trước đây vẫn còn ở nhánh [`mixxx-fork`](../../tree/mixxx-fork).
