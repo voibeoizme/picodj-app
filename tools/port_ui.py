@@ -45,6 +45,29 @@ R("""document.getElementById('tree').addEventListener('click',e=>{ const x=e.tar
   if(xd){ DIRS.splice(+xd.dataset.deldir,1); saveDirs(); S.list='col'; rescanDirs(); toast('Đã bỏ thư mục khỏi danh sách (file trên máy vẫn còn)'); return; }
   const x=e.target.closest('.x');""")
 R("  if(k==='xml'){ document.getElementById('xmlinput').click(); return; }","  if(k==='xml'){ document.getElementById('xmlinput').click(); return; }\n  if(k==='adddir'){ pickFolder(); return; }")
+# ── no folder needed: XML tracks are read from their own path; dropped files are copied into the app's library ──
+R("function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file); }",
+  "function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path); }\nconst TAURI_APP=!!window.__TAURI__;")
+R("async function getFile(t){ let f=FILES.get(t.file.toLowerCase());",
+  "async function getFile(t){ let f=FILES.get(t.file.toLowerCase()); if(!f&&TAURI&&t.path) return new DiskFile({path:t.path,name:t.file,size:0});")
+R("async function addDroppedFiles(dt){\n","async function addDroppedFiles(dt){ if(TAURI) return addDroppedTauri(dt);\n")
+R("async function rescanDirs(){ for(const [k,v] of [...FILES]) if(v instanceof DiskFile) FILES.delete(k); for(const d of DIRS) await scanDir(d); folderReady(); }",
+  """async function rescanDirs(){ for(const [k,v] of [...FILES]) if(v instanceof DiskFile) FILES.delete(k); if(APPDIR) await scanDir(APPDIR); for(const d of DIRS) await scanDir(d); folderReady(); }
+// files dragged into the app are copied to the app's own music folder, so they are still there next time
+let APPDIR=null;
+async function addDroppedTauri(dt){ const out=[]; let n=0;
+  for(const f of dt.files){ if(!AUDIO_EXT.test(f.name)) continue; const k=f.name.toLowerCase();
+    try{ let df=FILES.get(k);
+      if(!(df instanceof DiskFile)){ const path=await inv('import_file',new Uint8Array(await f.arrayBuffer()),{headers:{'x-name':encodeURIComponent(f.name)}}); df=new DiskFile({path,name:f.name,size:f.size}); FILES.set(k,df); if(APPDIR&&!APPDIR.names.includes(k)) APPDIR.names.push(k); n++; }
+      out.push(trackForFile(f.name)); }catch(e){ toast('Không lưu được '+f.name+': '+e); } }
+  if(n) toast(`Đã lưu ${n} bài vào thư viện của app`); folderReady(); return out; }""")
+R("if(TAURI){ if(DIRS.length) await rescanDirs(); return; }","if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } await rescanDirs(); return; }")
+R("it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }",
+  "if(APPDIR&&APPDIR.names.length) it.push({key:'dir:app',name:'Nhạc đã kéo vào app',title:APPDIR.path,ids:APPDIR.names.map(n=>trackForFile(FILES.get(n).name).id),depth:1}); it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }")
+R("toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);",
+  "toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${TAURI?' · phát thẳng từ đường dẫn trong XML':FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);")
+R("return toast(FILES.size?`Không thấy file \"${t.file}\" trong thư mục đã chọn`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');",
+  "return toast(FILES.size||TAURI?`Không thấy file \"${t.file}\" — thêm thư mục chứa nó hoặc kéo file vào app`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');")
 # ── MIDI through Rust (all ports, hot-plug), LED feedback out ──
 R("""async function connectMidi(){ ensureAudio();
   if(!navigator.requestMIDIAccess)""","""async function connectMidi(){ ensureAudio();

@@ -24,10 +24,13 @@ Phần mềm DJ nhẹ cho **bàn DJ tự chế dùng Raspberry Pi Pico** (firmwa
 
 ## Dùng lần đầu
 
-1. Bấm **THƯ MỤC NHẠC** trên thanh trên cùng để thêm thư mục nhạc. Thêm được nhiều thư mục, app nhớ lại ở lần mở sau.
-2. *(Tuỳ chọn)* Bấm **IMPORT XML**, chọn file Rekordbox xuất từ **File → Export Collection in xml format**.
-3. Cắm bàn DJ qua USB: chữ **MIDI** chuyển sang màu xanh là app đã nhận bàn.
-4. **F11** để bật/tắt toàn màn hình.
+Không bắt buộc chọn thư mục nhạc, app tự nhớ mọi thứ cho lần mở sau.
+
+- **IMPORT XML**: chọn file Rekordbox xuất từ **File → Export Collection in xml format**. App phát thẳng từ đường dẫn ghi trong XML. Bấm lại nút này để import XML khác hoặc **xoá XML** đã import.
+- **Kéo file nhạc vào app**: file được lưu vào thư viện riêng của app (mục *Nhạc đã kéo vào app*).
+- **THƯ MỤC NHẠC** *(tuỳ chọn)*: thêm thư mục để app quét toàn bộ nhạc trong đó.
+- Cắm bàn DJ qua USB: chữ **MIDI** chuyển sang màu xanh là app đã nhận bàn.
+- **F11** để bật/tắt toàn màn hình.
 
 ## Phát triển
 

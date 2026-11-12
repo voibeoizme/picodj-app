@@ -83,6 +83,56 @@ fn file_exists(path: String) -> bool {
     Path::new(&path).is_file()
 }
 
+/// The app's own music folder (files dragged into the app are kept here).
+fn app_music(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let d = app.path().app_data_dir().map_err(|e| e.to_string())?.join("Music");
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    Ok(d)
+}
+
+#[tauri::command]
+fn music_dir(app: AppHandle) -> Result<String, String> {
+    Ok(app_music(&app)?.to_string_lossy().into_owned())
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Saves a dropped audio file (raw bytes in the request body, name in the `x-name` header) into the app's music folder.
+#[tauri::command]
+async fn import_file(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else { return Err("thiếu dữ liệu file".into()) };
+    let raw = request.headers().get("x-name").and_then(|v| v.to_str().ok()).ok_or("thiếu tên file")?;
+    let name = percent_decode(raw);
+    let name = Path::new(&name).file_name().and_then(|n| n.to_str()).ok_or("tên file không hợp lệ")?.to_string();
+    if !is_audio(Path::new(&name)) {
+        return Err(format!("không phải file nhạc: {name}"));
+    }
+    let dest = app_music(&app)?.join(&name);
+    let same = std::fs::metadata(&dest).map(|m| m.len() == data.len() as u64).unwrap_or(false);
+    if !same {
+        let bytes = data.clone();
+        let d2 = dest.clone();
+        tauri::async_runtime::spawn_blocking(move || std::fs::write(&d2, bytes)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    }
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 // ───────────────────────── MIDI ─────────────────────────
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod midi {
@@ -103,8 +153,19 @@ mod midi {
     }
 
     fn skip(name: &str) -> bool {
-        // our own virtual ports and the Linux loopback
-        name.contains("Midi Through") || name.starts_with("PicoDJ")
+        // our own virtual ports, the Linux loopback, and software synths (Windows' "Microsoft GS Wavetable Synth"
+        // turns every LED message into a piano note)
+        let l = name.to_lowercase();
+        name.contains("Midi Through") || name.starts_with("PicoDJ") || l.contains("wavetable") || l.contains("microsoft gs")
+            || l.contains("fluid") || l.contains("timidity") || l.contains("synth")
+    }
+
+    /// "Pico DJ 1" / "MIDIOUT2 (Pico DJ)" → "picodj"
+    fn norm(name: &str) -> String {
+        let n = name.to_lowercase();
+        let n = n.trim_start_matches("midiout").trim_start_matches("midiin");
+        let s: String = n.chars().filter(|c| c.is_alphanumeric()).collect();
+        s.trim_start_matches(|c: char| c.is_ascii_digit()).trim_end_matches(|c: char| c.is_ascii_digit()).to_string()
     }
 
     /// Opens every MIDI input/output that is not open yet and closes the ones that were unplugged.
@@ -133,7 +194,18 @@ mod midi {
         }
         // outputs (LED feedback) — same device names as the inputs
         if let Ok(probe_out) = MidiOutput::new("PicoDJ probe") {
-            let out_names: Vec<String> = probe_out.ports().iter().filter_map(|p| probe_out.port_name(p).ok()).filter(|n| !skip(n)).collect();
+            // LED feedback only goes to the controllers we receive from (never to a synth or another app)
+            let ins: Vec<String> = names.iter().map(|n| norm(n)).filter(|n| !n.is_empty()).collect();
+            let out_names: Vec<String> = probe_out
+                .ports()
+                .iter()
+                .filter_map(|p| probe_out.port_name(p).ok())
+                .filter(|n| !skip(n))
+                .filter(|n| {
+                    let o = norm(n);
+                    !o.is_empty() && ins.iter().any(|i| o.contains(i.as_str()) || i.contains(o.as_str()))
+                })
+                .collect();
             let mut outputs = state.outputs.lock().unwrap();
             outputs.retain(|(n, _)| out_names.contains(n));
             for name in &out_names {
@@ -190,6 +262,8 @@ pub fn run() {
             read_range,
             read_text,
             file_exists,
+            music_dir,
+            import_file,
             midi::midi_connect_all,
             midi::midi_send
         ])

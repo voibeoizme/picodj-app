@@ -932,7 +932,8 @@ function trackForFile(f){ const k=f.toLowerCase(); if(byFile[k]) return byFile[k
     const t=byId[id]={id,title:m?m[2]:f.replace(/\.[^.]+$/,''),artist:m?m[1]:'',album:'',genre:'',bpm:0,key:'',len:0,file:f,tempos:[],cues:[],hot:[],rating:0,added:''};
     const me=metaOf(t); if(!me.added){ me.added=today(); saveMeta(); } applyMeta(t); applyAnalysis(t); }
   return byId[id]; }
-function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file); }
+function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path); }
+const TAURI_APP=!!window.__TAURI__;
 function folderReady(){
   const n=LIB.tracks.filter(t=>FILES.has(t.file.toLowerCase())).length;
   document.getElementById('foldertxt').textContent=`${TAURI?`${DIRS.length} THƯ MỤC · `:''}${FILES.size} FILE${LIB.tracks.length?` · ${n}/${LIB.tracks.length} RB`:''}`; document.getElementById('folderbtn').classList.toggle('on',FILES.size>0);
@@ -948,7 +949,7 @@ async function loadPersist(){ const xml=await idb.get('rbxml'); USERPL=(await id
   folderReady(); }
 async function savePl(){ await idb.set('userpl',USERPL); }
 async function persistDropped(){ await idb.set('dropped',[...DROPPED].map(([name,handle])=>({name,handle}))); }
-async function addDroppedFiles(dt){
+async function addDroppedFiles(dt){ if(TAURI) return addDroppedTauri(dt);
   const out=[]; const items=dt.items?[...dt.items]:[];
   for(let i=0;i<dt.files.length;i++){ const f=dt.files[i]; let h=null; try{ if(items[i]&&items[i].getAsFileSystemHandle) h=await items[i].getAsFileSystemHandle(); }catch(e){}
     if(h&&h.kind==='directory'){ await scanHandle(h); continue; }
@@ -964,7 +965,15 @@ class DiskFile{ constructor(e){ this.path=e.path; this.name=e.name; this.size=e.
 let DIRS=[]; try{ DIRS=JSON.parse(localStorage.getItem('picodj.dirs')||'[]').map(p=>({path:p,names:[]})); }catch(e){}
 function saveDirs(){ try{ localStorage.setItem('picodj.dirs',JSON.stringify(DIRS.map(d=>d.path))); }catch(e){} }
 async function scanDir(d){ try{ const list=await inv('scan_folder',{path:d.path}); d.names=[]; for(const e of list){ const k=e.name.toLowerCase(); if(!FILES.has(k)) FILES.set(k,new DiskFile(e)); d.names.push(k); } d.err=''; }catch(e){ d.err=String(e); d.names=[]; log('Thư mục: '+e); } }
-async function rescanDirs(){ for(const [k,v] of [...FILES]) if(v instanceof DiskFile) FILES.delete(k); for(const d of DIRS) await scanDir(d); folderReady(); }
+async function rescanDirs(){ for(const [k,v] of [...FILES]) if(v instanceof DiskFile) FILES.delete(k); if(APPDIR) await scanDir(APPDIR); for(const d of DIRS) await scanDir(d); folderReady(); }
+// files dragged into the app are copied to the app's own music folder, so they are still there next time
+let APPDIR=null;
+async function addDroppedTauri(dt){ const out=[]; let n=0;
+  for(const f of dt.files){ if(!AUDIO_EXT.test(f.name)) continue; const k=f.name.toLowerCase();
+    try{ let df=FILES.get(k);
+      if(!(df instanceof DiskFile)){ const path=await inv('import_file',new Uint8Array(await f.arrayBuffer()),{headers:{'x-name':encodeURIComponent(f.name)}}); df=new DiskFile({path,name:f.name,size:f.size}); FILES.set(k,df); if(APPDIR&&!APPDIR.names.includes(k)) APPDIR.names.push(k); n++; }
+      out.push(trackForFile(f.name)); }catch(e){ toast('Không lưu được '+f.name+': '+e); } }
+  if(n) toast(`Đã lưu ${n} bài vào thư viện của app`); folderReady(); return out; }
 const dirName=p=>p.split(/[\\/]/).filter(Boolean).slice(-2).join(' / ')||p;
 async function pickFolder(){ ensureAudio();
   if(TAURI){ try{ const p=await inv('plugin:dialog|open',{options:{directory:true,multiple:false,title:'Chọn thư mục nhạc'}}); if(!p) return;
@@ -976,17 +985,19 @@ async function pickFolder(){ ensureAudio();
 }
 document.getElementById('dirinput').addEventListener('change',e=>{ FILES.clear(); for(const f of e.target.files) if(AUDIO_EXT.test(f.name)) FILES.set(f.name.toLowerCase(),f); folderReady(); });
 document.getElementById('folderbtn').addEventListener('click',pickFolder);
-(async()=>{ await loadPersist(); if(TAURI){ if(DIRS.length) await rescanDirs(); return; } const h=await idb.get('dir'); if(!h) return; try{ if(await h.queryPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); } else { document.getElementById('foldertxt').textContent='BẤM ĐỂ MỞ LẠI THƯ MỤC'; document.getElementById('folderbtn').onclick=async()=>{ ensureAudio(); if(await h.requestPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); document.getElementById('folderbtn').onclick=pickFolder; } }; } }catch(e){} })();
+(async()=>{ await loadPersist(); if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } await rescanDirs(); return; } const h=await idb.get('dir'); if(!h) return; try{ if(await h.queryPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); } else { document.getElementById('foldertxt').textContent='BẤM ĐỂ MỞ LẠI THƯ MỤC'; document.getElementById('folderbtn').onclick=async()=>{ ensureAudio(); if(await h.requestPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); document.getElementById('folderbtn').onclick=pickFolder; } }; } }catch(e){} })();
 // ── Rekordbox XML import (File → Export Collection in xml format) ──
 function parseRekordboxXml(text){
   const doc=new DOMParser().parseFromString(text,'application/xml');
   if(doc.querySelector('parsererror')) throw new Error('file XML bị lỗi cú pháp');
   const col=doc.querySelector('DJ_PLAYLISTS > COLLECTION'); if(!col) throw new Error('không phải file XML của Rekordbox (thiếu COLLECTION)');
+  // Location="file://localhost/C:/Music/a%20b.mp3" → "C:/Music/a b.mp3" (macOS: "/Users/…")
+  const locPath=loc=>{ let p=(loc||'').replace(/^file:\/\/localhost\//i,'').replace(/^file:\/\/\/?/i,''); try{ p=decodeURIComponent(p); }catch(e){} return /^[A-Za-z]:/.test(p)?p:'/'+p.replace(/^\/+/,''); };
   const base=loc=>{ let p=loc||''; try{ p=decodeURI(p); }catch(e){ try{ p=decodeURIComponent(p); }catch(_){} } return p.split(/[\\/]/).pop(); };
   const tracks=[], byLoc={};
   for(const tr of col.children){ if(tr.tagName!=='TRACK') continue; const g=a=>tr.getAttribute(a)||'';
     const t={id:g('TrackID'),title:g('Name')||base(g('Location')),artist:g('Artist'),album:g('Album'),genre:g('Genre'),bpm:parseFloat(g('AverageBpm'))||0,key:g('Tonality'),len:parseInt(g('TotalTime'))||0,
-      file:base(g('Location')),rating:Math.round((parseInt(g('Rating'))||0)/51),added:g('DateAdded'),
+      file:base(g('Location')),path:locPath(g('Location')),rating:Math.round((parseInt(g('Rating'))||0)/51),added:g('DateAdded'),
       tempos:[...tr.getElementsByTagName('TEMPO')].map(x=>({t:parseFloat(x.getAttribute('Inizio')),bpm:parseFloat(x.getAttribute('Bpm')),beat:parseInt(x.getAttribute('Battito'))||1})),
       cues:[...tr.getElementsByTagName('POSITION_MARK')].map(x=>({t:parseFloat(x.getAttribute('Start')),n:parseInt(x.getAttribute('Num')),type:parseInt(x.getAttribute('Type'))||0}))};
     if(!t.id||!t.file) continue; tracks.push(t); byLoc[g('Location')]=t.id; }
@@ -1008,14 +1019,17 @@ function setLib(data){
   for(const k of Object.keys(byId)) if(k.startsWith('f:')&&byFile[k.slice(2)]) delete byId[k];
   document.getElementById('xmltxt').textContent=`XML · ${LIB.tracks.length} BÀI`; document.getElementById('xmlbtn').classList.toggle('on',LIB.tracks.length>0);
 }
-document.getElementById('xmlbtn').addEventListener('click',()=>document.getElementById('xmlinput').click());
+function clearXml(){ setLib({tracks:[],playlists:[]}); idb.set('rbxml',null); document.getElementById('xmltxt').textContent='IMPORT XML'; if(S.list.startsWith('rb')) S.list='col'; S.sel=0; folderReady(); toast('Đã xoá dữ liệu XML (file nhạc trên máy vẫn còn)'); }
+document.getElementById('xmlbtn').addEventListener('click',e=>{ const b=e.currentTarget;
+  if(!LIB.tracks.length) return document.getElementById('xmlinput').click();
+  openMenu(b,[{l:'IMPORT XML KHÁC…',v:'imp'},{l:'XOÁ XML ĐÃ IMPORT',v:'clr'}],null,v=>{ if(v==='imp') document.getElementById('xmlinput').click(); else clearXml(); }); });
 document.getElementById('xmlinput').addEventListener('change',async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f) return;
   try{ const data=parseRekordboxXml(await f.text()); if(!data.tracks.length) throw new Error('không có bài nào trong COLLECTION');
     setLib(data); await idb.set('rbxml',data); S.open.rb=true; S.list='rbc'; S.sel=0; folderReady();
     const n=LIB.tracks.filter(hasFile).length;
-    toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);
+    toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${TAURI?' · phát thẳng từ đường dẫn trong XML':FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);
   }catch(err){ toast('Import XML lỗi: '+err.message); } });
-async function getFile(t){ let f=FILES.get(t.file.toLowerCase()); if(!f){ const h=DROPPED.get(t.file); if(h&&await h.requestPermission({mode:'read'})==='granted'){ FILES.set(t.file.toLowerCase(),h); f=h; folderReady(); } } if(!f) return null; return f.getFile ? await f.getFile() : f; }
+async function getFile(t){ let f=FILES.get(t.file.toLowerCase()); if(!f&&TAURI&&t.path) return new DiskFile({path:t.path,name:t.file,size:0}); if(!f){ const h=DROPPED.get(t.file); if(h&&await h.requestPermission({mode:'read'})==='granted'){ FILES.set(t.file.toLowerCase(),h); f=h; folderReady(); } } if(!f) return null; return f.getFile ? await f.getFile() : f; }
 async function readTrackFile(t){ const f=await getFile(t); return f?await f.arrayBuffer():null; }
 
 // ── ID3v2.3/2.4 reader: title, artist, album, genre, initial key, cover art (scaled to a 64 px thumbnail) ──
@@ -1221,10 +1235,10 @@ function drawMeters(){
 function drawJogs(){ for(const n of [1,2]){ const d=D[n], ang=((d.buffer?d.curPos():0)/1.8*360)%360; document.getElementById('jm'+n).setAttribute('transform',`rotate(${ang.toFixed(1)} 56 56)`); } }
 
 // ═══════════ Browser ═══════════
-function collectionIds(){ const ids=[]; for(const t of LIB.tracks) if(FILES.has(t.file.toLowerCase())) ids.push(t.id); for(const [f,v] of FILES) if(!byFile[f]) ids.push(trackForFile(v.name||f).id); return ids; }
+function collectionIds(){ const ids=[]; for(const t of LIB.tracks) if(hasFile(t)) ids.push(t.id); for(const [f,v] of FILES) if(!byFile[f]) ids.push(trackForFile(v.name||f).id); return ids; }
 function treeItems(){ const it=[{key:'col',name:'Collection',ids:collectionIds(),depth:0}];
   if(TAURI){ it.push({key:'grp:dir',name:'Thư mục nhạc',group:'dir',depth:0});
-    if(S.open.dir!==false){ DIRS.forEach((d,i)=>it.push({key:'dir:'+i,name:dirName(d.path)+(d.err?' (không mở được)':''),title:d.path,ids:d.names.map(n=>trackForFile(FILES.get(n).name).id),dir:i,depth:1})); it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }
+    if(S.open.dir!==false){ DIRS.forEach((d,i)=>it.push({key:'dir:'+i,name:dirName(d.path)+(d.err?' (không mở được)':''),title:d.path,ids:d.names.map(n=>trackForFile(FILES.get(n).name).id),dir:i,depth:1})); if(APPDIR&&APPDIR.names.length) it.push({key:'dir:app',name:'Nhạc đã kéo vào app',title:APPDIR.path,ids:APPDIR.names.map(n=>trackForFile(FILES.get(n).name).id),depth:1}); it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }
   it.push({key:'grp:pl',name:'Playlists',group:'pl',depth:0});
   if(S.open.pl){ USERPL.forEach((p,i)=>it.push({key:'u:'+i,name:p.name,ids:p.ids,user:1,ui:i,depth:1})); it.push({key:'add',name:'＋ Tạo playlist mới',add:1,depth:1}); }
   if(!LIB.tracks.length) it.push({key:'xml',name:'＋ Import rekordbox.xml',add:1,depth:0});
@@ -1337,7 +1351,7 @@ function loadTo(n){ const t=curList()[S.sel]; if(t) loadTrack(n,t); }
 async function loadTrack(n,t){
   const d=D[n]; ensureAudio(); if(!AC) return;
   if(d.playing) return toast(`Deck ${n} đang phát — dừng trước khi LOAD`);
-  if(!hasFile(t)) return toast(FILES.size?`Không thấy file "${t.file}" trong thư mục đã chọn`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');
+  if(!hasFile(t)) return toast(FILES.size||TAURI?`Không thấy file "${t.file}" — thêm thư mục chứa nó hoặc kéo file vào app`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');
   d.unload(); d.loading=true; d.track=t; S.lastLoaded=n; drawDeckInfo(n); renderRows(); drawWave(n);
   try{ const ab=await readTrackFile(t); if(!ab) throw new Error('không có quyền đọc file'); const buf=await AC.decodeAudioData(ab); if(d.track!==t) return;
     d.buffer=buf; d.wave=await analyzeWave(buf); if(!t.len) t.len=Math.round(buf.duration); applyAnalysis(t);
