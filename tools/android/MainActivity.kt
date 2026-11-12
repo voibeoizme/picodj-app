@@ -56,6 +56,8 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     web = webView
+    // let Web Audio start without waiting for a tap
+    webView.settings.mediaPlaybackRequiresUserGesture = false
     val m = midi ?: PicoMidi(this) { js(it) }
     midi = m
     webView.addJavascriptInterface(m, "PicoMidi")

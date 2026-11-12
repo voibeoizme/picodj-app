@@ -77,7 +77,7 @@ R("return toast(FILES.size?`Không thấy file \"${t.file}\" trong thư mục đ
 R("""async function connectMidi(){ ensureAudio();
   if(!navigator.requestMIDIAccess)""","""async function connectMidi(){ ensureAudio();
   if(ANDROID){ const pm=window.PicoMidi; if(!pm){ mtxt.textContent='MIDI · ĐANG KHỞI ĐỘNG'; connectMidi.miss=(connectMidi.miss||0)+1; if(connectMidi.miss===3&&!sessionStorage.getItem('pdj.reload')){ sessionStorage.setItem('pdj.reload','1'); location.reload(); } return; }
-    let names=[]; try{ names=JSON.parse(pm.devices()); }catch(e){} pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\n'):'Cắm bàn DJ vào điện thoại qua cáp OTG'; return; }
+    let names=[]; try{ names=JSON.parse(pm.devices()); }catch(e){} pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\\n'):'Cắm bàn DJ vào điện thoại qua cáp OTG'; return; }
   if(TAURI){ try{ const names=await inv('midi_connect_all'); pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\\n'):'Chưa thấy thiết bị MIDI nào — cắm bàn qua USB'; }catch(e){ mtxt.textContent='MIDI LỖI'; pill.title=String(e); if(String(e)!==connectMidi.lastErr){ connectMidi.lastErr=String(e); log('MIDI: '+e); } } return; }
   if(!navigator.requestMIDIAccess)""")
 R("pill.addEventListener('click',connectMidi);","""pill.addEventListener('click',connectMidi);
@@ -99,4 +99,10 @@ R("""document.addEventListener('keydown',e=>{
 # start audio straight away in the app (the click gate stays as a fallback)
 R("renderTree(); renderRows(); fit(); requestAnimationFrame(tick);","renderTree(); renderRows(); fit(); requestAnimationFrame(tick);\nif(TAURI){ ensureAudio(); setTimeout(audioStatus,400); }")
 open(sys.argv[2],'w',encoding='utf-8').write(src)
+# refuse to ship a page whose script does not parse (a broken script = dead buttons)
+import re, shutil, subprocess, tempfile
+if shutil.which('node'):
+    with tempfile.NamedTemporaryFile('w',suffix='.js',delete=False,encoding='utf-8') as f: f.write('\n'.join(re.findall(r'<script>(.*?)</script>',src,re.S)))
+    r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
+    if r.returncode: sys.exit('JS syntax error:\n'+r.stderr[:2000])
 print('ok',len(src))
