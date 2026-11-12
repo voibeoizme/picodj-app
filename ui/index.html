@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>PicoDJ</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
@@ -932,7 +932,7 @@ function trackForFile(f){ const k=f.toLowerCase(); if(byFile[k]) return byFile[k
     const t=byId[id]={id,title:m?m[2]:f.replace(/\.[^.]+$/,''),artist:m?m[1]:'',album:'',genre:'',bpm:0,key:'',len:0,file:f,tempos:[],cues:[],hot:[],rating:0,added:''};
     const me=metaOf(t); if(!me.added){ me.added=today(); saveMeta(); } applyMeta(t); applyAnalysis(t); }
   return byId[id]; }
-function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path); }
+function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path&&!/Android/i.test(navigator.userAgent)); }
 const TAURI_APP=!!window.__TAURI__;
 function folderReady(){
   const n=LIB.tracks.filter(t=>FILES.has(t.file.toLowerCase())).length;
@@ -958,7 +958,8 @@ async function addDroppedFiles(dt){ if(TAURI) return addDroppedTauri(dt);
   if(DROPPED.size) persistDropped(); folderReady(); return out;
 }
 // ── native app (Tauri): music folders are scanned by Rust, files read straight from disk ──
-const TAURI=window.__TAURI__||null, inv=TAURI?TAURI.core.invoke:null;
+const TAURI=window.__TAURI__||null, inv=TAURI?TAURI.core.invoke:null, ANDROID=!!TAURI&&/Android/i.test(navigator.userAgent);
+const ANDROID_DIRS=[['Music','/storage/emulated/0/Music'],['Download','/storage/emulated/0/Download'],['Documents','/storage/emulated/0/Documents'],['Toàn bộ bộ nhớ máy','/storage/emulated/0']];
 class DiskFile{ constructor(e){ this.path=e.path; this.name=e.name; this.size=e.size; }
   async arrayBuffer(){ return await inv('read_file',{path:this.path}); }
   slice(a,b){ const p=this.path, n=Math.max(0,Math.min(b??this.size,this.size)-a); return {arrayBuffer:()=>inv('read_range',{path:p,start:a,len:n})}; } }
@@ -976,6 +977,10 @@ async function addDroppedTauri(dt){ const out=[]; let n=0;
   if(n) toast(`Đã lưu ${n} bài vào thư viện của app`); folderReady(); return out; }
 const dirName=p=>p.split(/[\\/]/).filter(Boolean).slice(-2).join(' / ')||p;
 async function pickFolder(){ ensureAudio();
+  if(ANDROID){ openMenu(document.getElementById('folderbtn'),[...ANDROID_DIRS.map(([l,v])=>({l,v})),{l:'Nhập đường dẫn khác…',v:'?'}],null,async p=>{
+      if(p==='?'){ p=prompt('Đường dẫn thư mục nhạc','/storage/emulated/0/'); if(!p) return; p=p.trim().replace(/\/+$/,''); }
+      if(DIRS.some(d=>d.path===p)) return toast('Thư mục này đã có trong danh sách');
+      const d={path:p,names:[]}; DIRS.push(d); saveDirs(); await scanDir(d); S.open.dir=true; S.list='dir:'+(DIRS.length-1); S.sel=0; folderReady(); toast(d.err?'Không mở được: '+d.err:`Đã thêm ${d.names.length} file từ ${dirName(p)}`); }); return; }
   if(TAURI){ try{ const p=await inv('plugin:dialog|open',{options:{directory:true,multiple:false,title:'Chọn thư mục nhạc'}}); if(!p) return;
       if(DIRS.some(d=>d.path===p)) return toast('Thư mục này đã có trong danh sách');
       const d={path:p,names:[]}; DIRS.push(d); saveDirs(); await scanDir(d); S.open.dir=true; S.list='dir:'+(DIRS.length-1); S.sel=0; folderReady(); toast(`Đã thêm ${d.names.length} file từ ${dirName(p)}`);
@@ -985,7 +990,7 @@ async function pickFolder(){ ensureAudio();
 }
 document.getElementById('dirinput').addEventListener('change',e=>{ FILES.clear(); for(const f of e.target.files) if(AUDIO_EXT.test(f.name)) FILES.set(f.name.toLowerCase(),f); folderReady(); });
 document.getElementById('folderbtn').addEventListener('click',pickFolder);
-(async()=>{ await loadPersist(); if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } await rescanDirs(); return; } const h=await idb.get('dir'); if(!h) return; try{ if(await h.queryPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); } else { document.getElementById('foldertxt').textContent='BẤM ĐỂ MỞ LẠI THƯ MỤC'; document.getElementById('folderbtn').onclick=async()=>{ ensureAudio(); if(await h.requestPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); document.getElementById('folderbtn').onclick=pickFolder; } }; } }catch(e){} })();
+(async()=>{ await loadPersist(); if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } if(ANDROID){ if(!localStorage.getItem('picodj.dirs')){ DIRS=ANDROID_DIRS.slice(0,2).map(([,p])=>({path:p,names:[]})); saveDirs(); } window.__pdjRescan=()=>rescanDirs(); } await rescanDirs(); return; } const h=await idb.get('dir'); if(!h) return; try{ if(await h.queryPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); } else { document.getElementById('foldertxt').textContent='BẤM ĐỂ MỞ LẠI THƯ MỤC'; document.getElementById('folderbtn').onclick=async()=>{ ensureAudio(); if(await h.requestPermission({mode:'read'})==='granted'){ await scanHandle(h); folderReady(); document.getElementById('folderbtn').onclick=pickFolder; } }; } }catch(e){} })();
 // ── Rekordbox XML import (File → Export Collection in xml format) ──
 function parseRekordboxXml(text){
   const doc=new DOMParser().parseFromString(text,'application/xml');
@@ -1501,6 +1506,9 @@ function onMidi(e){
 }
 const pill=document.getElementById('midipill'), mtxt=document.getElementById('miditxt');
 async function connectMidi(){ ensureAudio();
+  if(ANDROID){ const pm=window.PicoMidi; if(!pm){ mtxt.textContent='MIDI · ĐANG KHỞI ĐỘNG'; connectMidi.miss=(connectMidi.miss||0)+1; if(connectMidi.miss===3&&!sessionStorage.getItem('pdj.reload')){ sessionStorage.setItem('pdj.reload','1'); location.reload(); } return; }
+    let names=[]; try{ names=JSON.parse(pm.devices()); }catch(e){} pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('
+'):'Cắm bàn DJ vào điện thoại qua cáp OTG'; return; }
   if(TAURI){ try{ const names=await inv('midi_connect_all'); pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\n'):'Chưa thấy thiết bị MIDI nào — cắm bàn qua USB'; }catch(e){ mtxt.textContent='MIDI LỖI'; pill.title=String(e); if(String(e)!==connectMidi.lastErr){ connectMidi.lastErr=String(e); log('MIDI: '+e); } } return; }
   if(!navigator.requestMIDIAccess){ mtxt.textContent='KHÔNG HỖ TRỢ WEB MIDI'; return; }
   try{ const ma = await navigator.requestMIDIAccess({sysex:false});
@@ -1509,11 +1517,11 @@ async function connectMidi(){ ensureAudio();
   }catch(err){ mtxt.textContent='MIDI BỊ TỪ CHỐI'; log('MIDI: '+err.message); }
 }
 pill.addEventListener('click',connectMidi);
-if(TAURI){ TAURI.event.listen('midi',e=>onMidi({data:new Uint8Array(e.payload.data)})); connectMidi(); setInterval(connectMidi,3000); }
+if(TAURI){ window.__pdjMidi=a=>onMidi({data:new Uint8Array(a)}); if(!ANDROID) TAURI.event.listen('midi',e=>onMidi({data:new Uint8Array(e.payload.data)})); connectMidi(); setInterval(connectMidi,3000); }
 // LED feedback for controllers with lights (Bàn DJ ver 3): same note numbers as the buttons
 const LEDS=[[63,()=>D[1].playing],[69,()=>D[2].playing],[62,()=>!!D[1].track&&(!D[1].playing||D[1].cueHold)],[68,()=>!!D[2].track&&(!D[2].playing||D[2].cueHold)],
   [61,()=>D[1].sync],[65,()=>D[2].sync],[72,()=>FXU[1].slots[0].on],[71,()=>FXU[2].slots[0].on]], ledState={};
-function syncLeds(){ if(!TAURI) return; for(const [n,f] of LEDS){ const v=f()?127:0; if(ledState[n]!==v){ ledState[n]=v; inv('midi_send',{data:[0x90,n,v]}).catch(()=>{}); } } }
+function syncLeds(){ if(!TAURI) return; for(const [n,f] of LEDS){ const v=f()?127:0; if(ledState[n]!==v){ ledState[n]=v; if(ANDROID){ try{ window.PicoMidi&&PicoMidi.send(0x90,n,v); }catch(e){} } else inv('midi_send',{data:[0x90,n,v]}).catch(()=>{}); } } }
 
 // ═══════════ On-screen control + keyboard ═══════════
 document.addEventListener('pointerdown',e=>{

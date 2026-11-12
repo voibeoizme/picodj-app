@@ -1,0 +1,88 @@
+# Builds the PicoDJ Android app (.apk for 64-bit ARM phones) on GitHub's servers (about 15 minutes).
+# Runs on every push to main, or by hand: Actions → "Build PicoDJ for Android" → Run workflow.
+# Download from the run page → Artifacts → "PicoDJ-Android" (PicoDJ_x.y.z_arm64.apk inside the zip).
+
+name: Build PicoDJ for Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: 27.2.12479018
+  BUILD_TOOLS: 35.0.0
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and build tools
+        run: |
+          sdkmanager --install "ndk;${NDK_VERSION}" "build-tools;${BUILD_TOOLS}" "platforms;android-35" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: npm ci
+
+      - name: Create Android project
+        run: |
+          npx tauri android init --ci
+          python3 tools/android_patch.py
+
+      - name: Build APK
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Sign APK
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n 1)
+          echo "built: $APK"
+          BT="$ANDROID_HOME/build-tools/${BUILD_TOOLS}"
+          mkdir -p dist
+          "$BT/zipalign" -f -p 4 "$APK" dist/aligned.apk
+          "$BT/apksigner" sign --ks tools/android/picodj-release.jks --ks-key-alias picodj \
+            --ks-pass pass:picodj-sideload --key-pass pass:picodj-sideload \
+            --out "dist/PicoDJ_${VERSION}_arm64.apk" dist/aligned.apk
+          rm dist/aligned.apk
+          "$BT/apksigner" verify "dist/PicoDJ_${VERSION}_arm64.apk"
+          ls -la dist
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PicoDJ-Android
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30

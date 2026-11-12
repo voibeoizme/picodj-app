@@ -40,6 +40,11 @@ async fn scan_folder(path: String) -> Result<Vec<FileEntry>, String> {
         let files = walkdir::WalkDir::new(root)
             .follow_links(true)
             .into_iter()
+            // skip hidden folders and Android's app-data folder (huge, never music)
+            .filter_entry(|e| {
+                let n = e.file_name().to_string_lossy();
+                e.depth() == 0 || !e.file_type().is_dir() || !(n.starts_with('.') || n == "Android")
+            })
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_file() && is_audio(e.path()))
             .map(|e| FileEntry {

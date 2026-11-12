@@ -6,7 +6,7 @@ def R(a,b,count=1):
     assert src.count(a)==count, (src.count(a), a[:90])
     src=src.replace(a,b)
 # document shell
-src='<!doctype html>\n<html lang="vi">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'+src
+src='<!doctype html>\n<html lang="vi">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">\n'+src
 R('</style>\n','</style>\n</head>\n<body>\n')
 src=src.rstrip()+'\n</body>\n</html>\n'
 R('<small>PicoDJ v0.6.1</small>','<small>PicoDJ v0.8</small>')
@@ -14,7 +14,8 @@ R('__LIBRARY__','{"tracks":[],"playlists":[]}')
 # ── native layer: folders + files ──
 R("""async function pickFolder(){ ensureAudio();
   if(window.showDirectoryPicker)""","""// ── native app (Tauri): music folders are scanned by Rust, files read straight from disk ──
-const TAURI=window.__TAURI__||null, inv=TAURI?TAURI.core.invoke:null;
+const TAURI=window.__TAURI__||null, inv=TAURI?TAURI.core.invoke:null, ANDROID=!!TAURI&&/Android/i.test(navigator.userAgent);
+const ANDROID_DIRS=[['Music','/storage/emulated/0/Music'],['Download','/storage/emulated/0/Download'],['Documents','/storage/emulated/0/Documents'],['Toàn bộ bộ nhớ máy','/storage/emulated/0']];
 class DiskFile{ constructor(e){ this.path=e.path; this.name=e.name; this.size=e.size; }
   async arrayBuffer(){ return await inv('read_file',{path:this.path}); }
   slice(a,b){ const p=this.path, n=Math.max(0,Math.min(b??this.size,this.size)-a); return {arrayBuffer:()=>inv('read_range',{path:p,start:a,len:n})}; } }
@@ -24,6 +25,10 @@ async function scanDir(d){ try{ const list=await inv('scan_folder',{path:d.path}
 async function rescanDirs(){ for(const [k,v] of [...FILES]) if(v instanceof DiskFile) FILES.delete(k); for(const d of DIRS) await scanDir(d); folderReady(); }
 const dirName=p=>p.split(/[\\\\/]/).filter(Boolean).slice(-2).join(' / ')||p;
 async function pickFolder(){ ensureAudio();
+  if(ANDROID){ openMenu(document.getElementById('folderbtn'),[...ANDROID_DIRS.map(([l,v])=>({l,v})),{l:'Nhập đường dẫn khác…',v:'?'}],null,async p=>{
+      if(p==='?'){ p=prompt('Đường dẫn thư mục nhạc','/storage/emulated/0/'); if(!p) return; p=p.trim().replace(/\\/+$/,''); }
+      if(DIRS.some(d=>d.path===p)) return toast('Thư mục này đã có trong danh sách');
+      const d={path:p,names:[]}; DIRS.push(d); saveDirs(); await scanDir(d); S.open.dir=true; S.list='dir:'+(DIRS.length-1); S.sel=0; folderReady(); toast(d.err?'Không mở được: '+d.err:`Đã thêm ${d.names.length} file từ ${dirName(p)}`); }); return; }
   if(TAURI){ try{ const p=await inv('plugin:dialog|open',{options:{directory:true,multiple:false,title:'Chọn thư mục nhạc'}}); if(!p) return;
       if(DIRS.some(d=>d.path===p)) return toast('Thư mục này đã có trong danh sách');
       const d={path:p,names:[]}; DIRS.push(d); saveDirs(); await scanDir(d); S.open.dir=true; S.list='dir:'+(DIRS.length-1); S.sel=0; folderReady(); toast(`Đã thêm ${d.names.length} file từ ${dirName(p)}`);
@@ -47,7 +52,7 @@ R("""document.getElementById('tree').addEventListener('click',e=>{ const x=e.tar
 R("  if(k==='xml'){ document.getElementById('xmlinput').click(); return; }","  if(k==='xml'){ document.getElementById('xmlinput').click(); return; }\n  if(k==='adddir'){ pickFolder(); return; }")
 # ── no folder needed: XML tracks are read from their own path; dropped files are copied into the app's library ──
 R("function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file); }",
-  "function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path); }\nconst TAURI_APP=!!window.__TAURI__;")
+  "function hasFile(t){ return FILES.has(t.file.toLowerCase())||DROPPED.has(t.file)||(TAURI_APP&&!!t.path&&!/Android/i.test(navigator.userAgent)); }\nconst TAURI_APP=!!window.__TAURI__;")
 R("async function getFile(t){ let f=FILES.get(t.file.toLowerCase());",
   "async function getFile(t){ let f=FILES.get(t.file.toLowerCase()); if(!f&&TAURI&&t.path) return new DiskFile({path:t.path,name:t.file,size:0});")
 R("async function addDroppedFiles(dt){\n","async function addDroppedFiles(dt){ if(TAURI) return addDroppedTauri(dt);\n")
@@ -61,7 +66,7 @@ async function addDroppedTauri(dt){ const out=[]; let n=0;
       if(!(df instanceof DiskFile)){ const path=await inv('import_file',new Uint8Array(await f.arrayBuffer()),{headers:{'x-name':encodeURIComponent(f.name)}}); df=new DiskFile({path,name:f.name,size:f.size}); FILES.set(k,df); if(APPDIR&&!APPDIR.names.includes(k)) APPDIR.names.push(k); n++; }
       out.push(trackForFile(f.name)); }catch(e){ toast('Không lưu được '+f.name+': '+e); } }
   if(n) toast(`Đã lưu ${n} bài vào thư viện của app`); folderReady(); return out; }""")
-R("if(TAURI){ if(DIRS.length) await rescanDirs(); return; }","if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } await rescanDirs(); return; }")
+R("if(TAURI){ if(DIRS.length) await rescanDirs(); return; }","if(TAURI){ try{ APPDIR={path:await inv('music_dir'),names:[]}; }catch(e){ log('music_dir: '+e); } if(ANDROID){ if(!localStorage.getItem('picodj.dirs')){ DIRS=ANDROID_DIRS.slice(0,2).map(([,p])=>({path:p,names:[]})); saveDirs(); } window.__pdjRescan=()=>rescanDirs(); } await rescanDirs(); return; }")
 R("it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }",
   "if(APPDIR&&APPDIR.names.length) it.push({key:'dir:app',name:'Nhạc đã kéo vào app',title:APPDIR.path,ids:APPDIR.names.map(n=>trackForFile(FILES.get(n).name).id),depth:1}); it.push({key:'adddir',name:'＋ Thêm thư mục nhạc',add:1,depth:1}); } }")
 R("toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);",
@@ -71,14 +76,16 @@ R("return toast(FILES.size?`Không thấy file \"${t.file}\" trong thư mục đ
 # ── MIDI through Rust (all ports, hot-plug), LED feedback out ──
 R("""async function connectMidi(){ ensureAudio();
   if(!navigator.requestMIDIAccess)""","""async function connectMidi(){ ensureAudio();
+  if(ANDROID){ const pm=window.PicoMidi; if(!pm){ mtxt.textContent='MIDI · ĐANG KHỞI ĐỘNG'; connectMidi.miss=(connectMidi.miss||0)+1; if(connectMidi.miss===3&&!sessionStorage.getItem('pdj.reload')){ sessionStorage.setItem('pdj.reload','1'); location.reload(); } return; }
+    let names=[]; try{ names=JSON.parse(pm.devices()); }catch(e){} pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\n'):'Cắm bàn DJ vào điện thoại qua cáp OTG'; return; }
   if(TAURI){ try{ const names=await inv('midi_connect_all'); pill.classList.toggle('on',names.length>0); mtxt.textContent=names.length?`MIDI · ${names.length} THIẾT BỊ`:'MIDI · CHƯA THẤY BÀN'; pill.title=names.length?names.join('\\n'):'Chưa thấy thiết bị MIDI nào — cắm bàn qua USB'; }catch(e){ mtxt.textContent='MIDI LỖI'; pill.title=String(e); if(String(e)!==connectMidi.lastErr){ connectMidi.lastErr=String(e); log('MIDI: '+e); } } return; }
   if(!navigator.requestMIDIAccess)""")
 R("pill.addEventListener('click',connectMidi);","""pill.addEventListener('click',connectMidi);
-if(TAURI){ TAURI.event.listen('midi',e=>onMidi({data:new Uint8Array(e.payload.data)})); connectMidi(); setInterval(connectMidi,3000); }
+if(TAURI){ window.__pdjMidi=a=>onMidi({data:new Uint8Array(a)}); if(!ANDROID) TAURI.event.listen('midi',e=>onMidi({data:new Uint8Array(e.payload.data)})); connectMidi(); setInterval(connectMidi,3000); }
 // LED feedback for controllers with lights (Bàn DJ ver 3): same note numbers as the buttons
 const LEDS=[[63,()=>D[1].playing],[69,()=>D[2].playing],[62,()=>!!D[1].track&&(!D[1].playing||D[1].cueHold)],[68,()=>!!D[2].track&&(!D[2].playing||D[2].cueHold)],
   [61,()=>D[1].sync],[65,()=>D[2].sync],[72,()=>FXU[1].slots[0].on],[71,()=>FXU[2].slots[0].on]], ledState={};
-function syncLeds(){ if(!TAURI) return; for(const [n,f] of LEDS){ const v=f()?127:0; if(ledState[n]!==v){ ledState[n]=v; inv('midi_send',{data:[0x90,n,v]}).catch(()=>{}); } } }""")
+function syncLeds(){ if(!TAURI) return; for(const [n,f] of LEDS){ const v=f()?127:0; if(ledState[n]!==v){ ledState[n]=v; if(ANDROID){ try{ window.PicoMidi&&PicoMidi.send(0x90,n,v); }catch(e){} } else inv('midi_send',{data:[0x90,n,v]}).catch(()=>{}); } } }""")
 R("  if(frame%6===0){ drawControls();","  if(frame%6===0){ drawControls(); syncLeds();")
 R("open:{pl:true,rb:true}","open:{pl:true,rb:true,dir:true}")
 # keep the original capitalisation of file names (FILES is keyed by lower-case name)
