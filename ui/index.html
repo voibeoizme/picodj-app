@@ -726,7 +726,7 @@ class Deck{
   pitchRatio(){ let p=Math.pow(2,(this.keyShift+this.cfxSemi)/12); if(this.mt&&!this.brake) p/=Math.max(.3,this.rate()); return p; }
   applyPitch(){ if(this.kl) this.kl.parameters.get('ratio').setTargetAtTime(this.pitchRatio(),AC.currentTime,.004); }
   // semitones the listener hears relative to the original key
-  heardSemi(){ return this.keyShift + (this.mt?0:12*Math.log2(Math.max(.3,this.rate()))); }
+  heardSemi(){ return this.keyShift + (this.mt?0:12*Math.log2(Math.max(.3,this.baseRate()))); }
   applyCfx(mode, v, beatSec, p){
     const amt=S.cfxOn?(v-.5)*2:0, a=Math.min(1,Math.abs(amt)), on=a>.03, now=AC.currentTime, set=(x,y)=>x.setTargetAtTime(y,now,.01);
     let filt=['lowpass',22050], q=1.3, dry=1, eS=0,eW=0,eFb=.5,eF=['lowpass',2500], rS=0,rW=0,rF=['lowpass',2500], cS=0,cW=0,cBits=16,cH=20, nW=0,nF=1000, jS=0,jW=0,jFb=.5,jLfo=.25,jDep=.002, semi=0, gD=0, gDiv=1/4, comp=0;
@@ -753,7 +753,9 @@ class Deck{
     if(Math.abs(semi-this.cfxSemi)>.01){ this.cfxSemi=semi; this.applyPitch(); }
   }
   rate(){ return 1 + this.tempo/100 + this.bend + this.jogBend; }
-  bpm(){ return this.track&&this.track.bpm ? this.track.bpm*this.rate() : 0; }
+  // tempo fader only: what the BPM display, sync, FX timing and waveform zoom use (a pitch bend is a momentary push, not a tempo change)
+  baseRate(){ return 1 + this.tempo/100; }
+  bpm(){ return this.track&&this.track.bpm ? this.track.bpm*this.baseRate() : 0; }
   curPos(){ if(!this.playing) return this.pos; const el=AC.currentTime-this.anchorT;
     if(this.brake){ const b=this.brake, t=Math.min(el,b.dur); return Math.min(this.buffer.duration, this.anchorPos + b.r0*(t - t*t/(2*b.dur))); }
     let p=this.anchorPos+el*this.rate();
@@ -1127,11 +1129,12 @@ const S = { ctl:{ trim1:.5, trim2:.5, eqHi1:.5, eqMid1:.5, eqLo1:.5, cfx1:.5, eq
   list:'col', sel:0, open:{pl:true,rb:true,dir:true}, history:[] };
 try{ const k=localStorage.getItem('picodj.keyfmt'); if(k==='classic'||k==='cam') S.keyFmt=k; }catch(e){}
 // ── settings (⚙ CÀI ĐẶT), remembered between sessions ──
-const CFG={wave:'rgb',zoom:'8',bend:'1',keyFmt:S.keyFmt,range:'10',mt:'0',quant:'1'};
+const CFG={wave:'rgb',zoom:'8',bend:'0.08',sync:'beat',keyFmt:S.keyFmt,range:'10',mt:'0',quant:'1'};
 const SETTINGS=[
   {k:'wave',l:'Màu waveform',h:'RGB: bass đỏ, mid xanh lá, treble xanh dương · 3 BAND: ba dải chồng lên nhau · BLUE: một màu xanh',o:[['rgb','RGB'],['3band','3 BAND'],['blue','BLUE']]},
   {k:'zoom',l:'Độ dài waveform trên màn hình',h:'Số giây nhạc hiện trên waveform lớn',o:[['4','4 giây'],['8','8 giây'],['16','16 giây']]},
-  {k:'bend',l:'Độ mạnh pitch bend',h:'Nút PITCH BEND −/+ đẩy nhanh/chậm tạm thời mạnh đến đâu',o:[['0.5','Nhẹ'],['1','Vừa'],['1.7','Mạnh']]},
+  {k:'sync',l:'Kiểu SYNC',h:'BEAT SYNC: khớp tempo và kéo beat trùng nhau · BPM SYNC: chỉ khớp tempo, beat tự đuổi bằng tay',o:[['beat','BEAT SYNC'],['bpm','BPM SYNC']]},
+  {k:'bend',l:'Độ mạnh pitch bend',h:'Giữ nút PITCH BEND −/+ thì deck chạy nhanh/chậm hơn chừng này, thả ra là về tempo cũ',o:[['0.04','Nhẹ 4%'],['0.08','Rekordbox 8%'],['0.12','Mạnh 12%']]},
   {k:'keyFmt',l:'Kiểu hiển thị key',h:'',o:[['cam','8A (Camelot)'],['classic','Am (tên nốt)']]},
   {k:'range',l:'Tempo range',h:'Biên độ của fader tempo',o:[['6','±6%'],['10','±10%'],['16','±16%']]},
   {k:'mt',l:'Master Tempo khi mở app',h:'Giữ tông khi đổi tempo',o:[['0','Tắt'],['1','Bật']]},
@@ -1239,7 +1242,7 @@ function drawControls(){
   for(const n of [1,2]){ const d=D[n], o=D[3-n], t=d.track, sel=c=>document.querySelector(`#deck${n} [data-ctl="${c}"]`);
     sel('play').classList.toggle('lit',!!d.playing); sel('play').classList.toggle('blink',!!t&&!d.playing);
     sel('cue').classList.toggle('lit',!!t&&(!d.playing||d.cueHold));
-    sel('sync').classList.toggle('lit',d.sync); sel('master').classList.toggle('lit',S.master===n); sel('quant').classList.toggle('lit',S.quant);
+    { const sb=sel('sync'), lab=CFG.sync==='bpm'?'BPM SYNC':'BEAT SYNC'; if(sb.textContent!==lab) sb.textContent=lab; sb.classList.toggle('lit',d.sync); } sel('master').classList.toggle('lit',S.master===n); sel('quant').classList.toggle('lit',S.quant);
     q('jog'+n).classList.toggle('sync',d.sync);
     const bpm=d.bpm(); const bs=bpm?bpm.toFixed(2).split('.'):['--','--']; q('jb'+n).innerHTML=`${bs[0]}.<small>${bs[1]}</small>`;
     q('jtp'+n).textContent=(Math.abs(d.tempo)<.05?'0.0':(d.tempo>0?'+':'')+d.tempo.toFixed(1))+'%'; q('rg'+n).textContent='±'+d.range;
@@ -1267,7 +1270,7 @@ function drawWave(n){
   const g=cv.getContext('2d'), go=ov.getContext('2d'); g.clearRect(0,0,cv.width,cv.height); go.clearRect(0,0,ov.width,ov.height);
   if(!d.wave){ document.getElementById('bars'+n).textContent=''; g.fillStyle='#3a3a3a'; g.font='22px Helvetica, Arial, sans-serif'; g.textAlign='center'; g.fillText(d.loading?'Đang nạp và phân tích…':`Deck ${n}: kéo file nhạc vào đây`, cv.width/2, cv.height/2+8); return; }
   const w=d.wave, t=d.track, pos=d.dispPos(), W=cv.width, H=cv.height, mid=H/2;
-  const WIN=S.win*d.rate(), t0=pos-WIN/2, pxPerS=W/WIN;
+  const WIN=S.win*d.baseRate(), t0=pos-WIN/2, pxPerS=W/WIN;
   if(d.loop){ const x0=(d.loop.a-t0)*pxPerS, x1=(d.loop.b-t0)*pxPerS; g.fillStyle='#f39c1230'; g.fillRect(x0,0,x1-x0,H); g.fillStyle='#f39c12'; g.fillRect(x0,0,2,H); g.fillRect(x1-2,0,2,H); }
   const b0=Math.max(0,Math.floor(t0*w.bps)), b1=Math.min(w.nb,Math.ceil((t0+WIN)*w.bps)), bw=pxPerS/w.bps;
   for(let b=b0;b<b1;b++){ const x=(b/w.bps-t0)*pxPerS, pk=w.bins[b*4], lo=w.bins[b*4+1], mi=w.bins[b*4+2], hi=w.bins[b*4+3], hh=pk*H*.94;
@@ -1439,13 +1442,16 @@ async function loadTrack(n,t){
   renderRows(); drawControls(); drawWave(n); applyMixer();
 }
 function doSync(n){ const d=D[n], o=(S.master&&S.master!==n&&D[S.master].track)?D[S.master]:D[3-n];
-  if(!d.track||!o.track||!d.track.bpm||!o.track.bpm) return toast('BEAT SYNC cần cả 2 deck có bài và có BPM');
-  d.sync=!d.sync; if(!d.sync) return;
+  if(!d.track||!o.track||!d.track.bpm||!o.track.bpm) return toast('SYNC cần cả 2 deck có bài và có BPM');
+  d.sync=!d.sync; if(!d.sync) return; d.syncTo=o.n;
   d.tempo=Math.max(-d.range,Math.min(d.range,(o.bpm()/d.track.bpm-1)*100)); d.setRate();
-  if(d.playing&&o.playing){ const ob=beatsIn(o.track,o.curPos()-2,o.curPos()+2), db=beatsIn(d.track,d.curPos()-2,d.curPos()+2); if(ob.length&&db.length){
+  if(CFG.sync==='beat'&&d.playing&&o.playing){ const ob=beatsIn(o.track,o.curPos()-2,o.curPos()+2), db=beatsIn(d.track,d.curPos()-2,d.curPos()+2); if(ob.length&&db.length){
       const op=o.curPos(), dp=d.curPos(); const onb=ob.reduce((a,b)=>Math.abs(b.t-op)<Math.abs(a.t-op)?b:a); const dnb=db.reduce((a,b)=>Math.abs(b.t-dp)<Math.abs(a.t-dp)?b:a);
       d.seek(dp+(op-onb.t)*(d.rate()/o.rate())-(dp-dnb.t)); } }
 }
+// a synced deck keeps following the other deck's tempo fader
+function syncTick(){ for(const n of [1,2]){ const d=D[n]; if(!d.sync||!d.track||!d.track.bpm) continue; const o=D[d.syncTo||3-n]; if(!o.track||!o.track.bpm||o.sync) continue;
+  const tp=Math.max(-d.range,Math.min(d.range,(o.bpm()/d.track.bpm-1)*100)); if(Math.abs(tp-d.tempo)>.002){ d.tempo=tp; d.setRate(); } } }
 function nearestBeat(t,p){ const b=beatsIn(t,p-2,p+2); return b.length?b.reduce((a,x)=>Math.abs(x.t-p)<Math.abs(a.t-p)?x:a).t:p; }
 function beatFloor(t,p){ const b=beatsIn(t,p-4,p+.002); return b.length?b[b.length-1].t:p; }
 function delHot(n,i){ const t=D[n].track; if(!t||t.hot[i]==null) return; t.hot[i]=null; metaOf(t).hot=t.hot.slice(); saveMeta(); toast(`Đã xoá hot cue ${'ABCDEFGH'[i]}`); drawControls(); drawWave(n); }
@@ -1499,11 +1505,9 @@ document.addEventListener('pointerdown',e=>{ if(MENU&&!MENU.contains(e.target)) 
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeMenu(); });
 const anchorOf=(ctl,deck)=>document.querySelector(`[data-ctl="${ctl}"]${deck?`[data-deck="${deck}"]`:''}`);
 function setLoopBeats(n,beats){ const d=D[n]; d.loopBeats=beats; if(!d.loop||!d.track) return; const per=60/(d.track.bpm||120), a=d.loop.a, b=a+beats*per, p=d.curPos(); d.setLoop(a,b); if(p>=b) d.seek(a+((p-a)%(b-a))); }
-// PITCH BEND buttons: a tap is a fine nudge (0.6 %), holding makes it stronger (up to 4 % after ~2 s) — like nudging a CDJ jog
-const BEND={min:.006,max:.04,ramp:.017};
-function bendKey(d,dir){ if(dir&&d.bendDir===dir) return; d.bendDir=dir; d.bendT=performance.now(); d.bend=dir*BEND.min*(+CFG.bend); d.setRate(); }
-function bendTick(){ const now=performance.now(); for(const n of [1,2]){ const d=D[n]; if(!d.bendDir) continue;
-  const k=+CFG.bend, b=d.bendDir*Math.min(BEND.max*k,(BEND.min+(now-d.bendT)/1000*BEND.ramp)*k); if(Math.abs(b-d.bend)>=.001){ d.bend=b; d.setRate(); } } }
+// PITCH BEND buttons, measured from Rekordbox: the deck runs a constant ~8 % faster/slower for as long as the button is held
+// and returns to its tempo on release. The BPM display and the waveform zoom do not move.
+function bendKey(d,dir){ if(dir&&d.bendDir===dir) return; d.bendDir=dir; d.bend=dir*(+CFG.bend); d.setRate(); }
 function act(name, deck, pressed, value, ev){
   if(pressed) dbg(`act ${name}${deck?' '+deck:''}${value!=null?' v='+value:''}`);
   const d=D[deck]; if(pressed) flash(name,deck);
@@ -1654,7 +1658,7 @@ addEventListener('resize',fit);
 let frame=0;
 function tick(){ frame++;
   for(const n of [1,2]){ const d=D[n]; if(d.playing||d.loading||frame%10===0) drawWave(n); }
-  drawMeters(); drawJogs(); gateTick(); bendTick();
+  drawMeters(); drawJogs(); gateTick(); syncTick();
   if(frame%30===0){ audioStatus(); const r=refDeck(), rk=r?r.track.key||null:null; if(rk!==S.refShown) renderRows(); }
   if(frame%6===0){ drawControls(); syncLeds(); const t=new Date(); document.getElementById('mclock').textContent=`${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`; }
   requestAnimationFrame(tick);
