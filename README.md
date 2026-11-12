@@ -22,6 +22,16 @@ Phần mềm DJ nhẹ cho **bàn DJ tự chế dùng Raspberry Pi Pico** (firmwa
 3. Trong file zip có hai bản cài, dùng bản nào cũng được: `PicoDJ_x.y.z_x64-setup.exe` hoặc `PicoDJ_x.y.z_x64_en-US.msi`.
 4. Bản build chưa được ký số, nên Windows SmartScreen có thể cảnh báo: bấm **More info → Run anyway**.
 
+## Tải bản Android
+
+1. Vào tab **Actions** → chọn lần chạy **Build PicoDJ for Android** mới nhất có dấu ✅ → mục **Artifacts** → tải **PicoDJ-Android**.
+2. Giải nén, chép file `PicoDJ_x.y.z_arm64.apk` vào điện thoại và mở để cài (cho phép *cài ứng dụng không rõ nguồn gốc* khi máy hỏi).
+3. Lần đầu mở, cho phép app đọc **nhạc và âm thanh**. App tự quét thư mục **Music** và **Download**. Muốn thêm chỗ khác thì bấm **THƯ MỤC NHẠC**.
+4. Cắm bàn DJ bằng cáp **OTG**: chữ **MIDI** chuyển xanh là app đã nhận bàn.
+
+Bài trong XML được tìm theo tên file trong các thư mục nhạc trên điện thoại, vì đường dẫn trong XML là của máy tính.
+File ký số `tools/android/picodj-release.jks` chỉ dùng để tự cài, nhờ nó bản mới cài đè được lên bản cũ.
+
 ## Dùng lần đầu
 
 Không bắt buộc chọn thư mục nhạc, app tự nhớ mọi thứ cho lần mở sau.
