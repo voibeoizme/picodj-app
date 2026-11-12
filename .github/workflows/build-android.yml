@@ -53,6 +53,11 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Test the C++ engine (beat grid and key on known test signals)
+        run: |
+          ./engine/build-cli.sh
+          ./engine/build/picodj-cli selftest
+
       - name: Install Tauri CLI
         run: npm ci
 

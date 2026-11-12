@@ -42,6 +42,20 @@ Không bắt buộc chọn thư mục nhạc, app tự nhớ mọi thứ cho l�
 - Cắm bàn DJ qua USB: chữ **MIDI** chuyển sang màu xanh là app đã nhận bàn.
 - **F11** để bật/tắt toàn màn hình.
 
+## Khi gặp lỗi
+
+Bấm nút **DEBUG** trên thanh trên cùng → **SAO CHÉP TẤT CẢ** → dán vào tin nhắn báo lỗi. Trong đó có: phiên bản, thiết bị âm thanh, bàn DJ đã nhận, trạng thái 2 deck, các tín hiệu MIDI vừa nhận, các nút vừa bấm và nhật ký của engine. Nhật ký cũng được ghi ra file `picodj.log` trong thư mục dữ liệu của app.
+
+## Engine C++
+
+Phần phân tích bài (BPM, beatgrid, key) nằm ở `engine/`, viết bằng C++17, dùng thư viện [QM-DSP](https://github.com/c4dm/qm-dsp) theo cách [Mixxx](https://github.com/mixxxdj/mixxx) dùng. Cùng một mã nguồn chạy trên Windows, Android và công cụ dòng lệnh để thử:
+
+```bash
+./engine/build-cli.sh
+./engine/build/picodj-cli selftest            # tự kiểm tra bằng tín hiệu có tempo biết trước
+./engine/build/picodj-cli analyze bai.mp3     # BPM, beat đầu, key của một file
+```
+
 ## Phát triển
 
 ```bash
@@ -50,7 +64,7 @@ npx tauri dev      # chạy thử
 npx tauri build    # tạo bản cài
 ```
 
-Lộ trình: chuyển engine âm thanh sang Rust (cpal) để có độ trễ thấp hơn; viết lại thuật toán EQ, filter, beat detection và key detection theo [Mixxx](https://github.com/mixxxdj/mixxx); làm bản Android.
+Lộ trình: chuyển phần phát nhạc, mixer và FX sang engine C++ để có độ trễ thấp hơn; EQ, filter theo [Mixxx](https://github.com/mixxxdj/mixxx); làm bản Android.
 
 ## Giấy phép
 

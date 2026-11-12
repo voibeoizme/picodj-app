@@ -28,6 +28,13 @@ button{font-family:inherit;color:inherit}
 .hint{color:var(--fg2);font-size:12px}
 #gate{position:fixed;inset:0;background:#000000e0;z-index:40;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 #gate[hidden]{display:none}
+#dbgpanel{position:absolute;inset:0;z-index:60;background:#000c;display:flex;align-items:center;justify-content:center}
+#dbgpanel[hidden]{display:none}
+.dbgbox{width:1200px;height:760px;background:#161616;border:1px solid #3a3a3a;display:flex;flex-direction:column;gap:8px;padding:12px}
+.dbgbar{display:flex;gap:8px;align-items:center;color:#ddd;font:700 12px var(--font);letter-spacing:.06em}
+.dbgbar .btn{height:26px;padding:0 12px}
+#dbgout{flex:1;background:#0b0b0b;color:#cfd8dc;border:1px solid #2a2a2a;font:12px/1.45 Consolas,Menlo,monospace;padding:8px;resize:none;white-space:pre;user-select:text;-webkit-user-select:text}
+.dbgbox .hint{color:#888;font:11px var(--font)}
 #gatebtn{font:700 19px var(--font);letter-spacing:.06em;background:var(--blue);color:#fff;border:0;border-radius:4px;padding:16px 34px;cursor:pointer}
 #toast{position:absolute;left:50%;top:90px;transform:translateX(-50%);background:#202a38;border:1px solid #2f4a70;color:var(--fg);padding:7px 14px;border-radius:3px;font-size:12.5px;z-index:20;box-shadow:0 4px 16px #000c;white-space:nowrap}
 .dim{opacity:.32;cursor:not-allowed!important}
@@ -320,12 +327,13 @@ button{font-family:inherit;color:inherit}
 <div id="stage">
   <div id="top">
     <div id="logo" title="PicoDJ">P</div>
-    <span class="gsel">PERFORMANCE<small>PicoDJ v0.8</small></span>
+    <span class="gsel">PERFORMANCE<small>PicoDJ v0.9</small></span>
     <span class="gsel">2 Deck Horizontal</span>
     <button class="gico" id="folderbtn" title="Chọn thư mục nhạc"><span class="dot"></span><span id="foldertxt">THƯ MỤC NHẠC</span></button>
     <button class="gico" id="xmlbtn" title="Import file rekordbox.xml (Rekordbox: File → Export Collection in xml format)"><span class="dot"></span><span id="xmltxt">IMPORT XML</span></button>
     <button class="gico" id="midipill" title="Kết nối bàn DJ qua MIDI"><span class="dot"></span><span id="miditxt">MIDI</span></button>
     <span id="log"></span>
+    <button class="gico" id="dbgbtn" title="Thông tin gỡ lỗi: trạng thái app, MIDI nhận được, nhật ký — bấm để xem và sao chép gửi đi"><span id="dbgtxt">DEBUG</span></button>
     <span id="aclat">audio: chưa bật</span>
     <span id="mclock">0:00</span>
   </div>
@@ -386,6 +394,8 @@ button{font-family:inherit;color:inherit}
 
 <script id="libdata" type="application/json">{"tracks":[],"playlists":[]}</script>
 <script>
+const DBG={lines:[],midi:[],t0:performance.now()};
+
 'use strict';
 // ═══════════ Library (Rekordbox XML export) ═══════════
 const LIB = JSON.parse(document.getElementById('libdata').textContent);
@@ -521,7 +531,7 @@ function unlockAudio(){ ensureAudio(); if(AC&&AC.state!=='running') AC.resume().
 for(const ev of ['pointerdown','touchstart','keydown']) document.addEventListener(ev,unlockAudio,{capture:true,passive:true});
 setInterval(()=>{ if(AC&&AC.state!=='running'){ AC.resume().catch(()=>{}); } audioStatus(); },1500);
 document.getElementById('gatebtn').addEventListener('click',async()=>{ ensureAudio(); try{ if(AC) await AC.resume(); }catch(e){ toast('Không bật được audio: '+e.message); } audioStatus(); if(AC&&AC.state==='running') document.getElementById('gate').hidden=true; else toast('Audio vẫn chưa chạy: '+(AC?AC.state:'không tạo được AudioContext')); });
-window.addEventListener('error',e=>log('JS lỗi: '+e.message));
+window.addEventListener('error',e=>log('JS lỗi: '+e.message+' @'+(e.lineno||'?')+':'+(e.colno||'?')));
 window.addEventListener('unhandledrejection',e=>log('Lỗi: '+(e.reason&&e.reason.message||e.reason)));
 function makeIR(seconds, decay){
   const sr=AC.sampleRate, n=Math.floor(sr*seconds), buf=new AudioBuffer({numberOfChannels:2,length:n,sampleRate:sr});
@@ -1072,24 +1082,31 @@ function pumpTags(){ while(tagBusy<3&&TAGQ.length){ const t=TAGQ.shift(); tagBus
 let ANQ=null;
 function setProg(s){ document.getElementById('aprog').textContent=s; }
 function computePrev(w){ const N=120, p=[], m=[]; for(let i=0;i<N;i++){ const a=Math.floor(i*w.nb/N), b=Math.max(a+1,Math.floor((i+1)*w.nb/N)); let pk=0,mi=0,lo=0; for(let j=a;j<b;j++){ pk=Math.max(pk,w.bins[j*4]); lo+=w.bins[j*4+1]; mi+=w.bins[j*4+2]; } p.push(Math.round(pk*99)); m.push(Math.round(Math.min(1,mi/(lo+mi+1e-6))*99)); } return {p,m}; }
+// replaced in the desktop/Android app by the C++ engine (BPM, beat grid, key straight from the file); null = analyse in JS
+async function nativeAnalyze(t){ if(!TAURI) return null; const f=FILES.get(t.file.toLowerCase()), path=f instanceof DiskFile?f.path:(!ANDROID&&t.path)||null; if(!path) return null;
+  try{ if(!await inv('engine_can_decode',{path})) return null; const r=await inv('analyze_file',{path});
+    dbg(`engine: ${r.bpm.toFixed(2)} BPM first ${r.first.toFixed(3)} conf ${r.confidence.toFixed(2)} key ${r.key} (${r.key_strength.toFixed(2)}) ${Math.round(r.ms)}ms — ${t.file}`);
+    return r.bpm>0&&r.confidence>=.5?r:{...r,bpm:0}; }catch(e){ dbg('engine analyze lỗi: '+e); return null; } }
 async function analyzeTracks(list, force){
   const btn=document.getElementById('analyzebtn');
   if(ANQ){ ANQ.cancel=true; return; }
   ensureAudio(); if(!AC) return;
   const todo=list.filter(t=>hasFile(t)&&(force||!t.bpm||!t.key||!t.prev));
   if(!todo.length) return toast(list.some(hasFile)?'Các bài trong danh sách đã được phân tích. Giữ Shift khi bấm để phân tích lại key.':'Không có bài nào có file trong danh sách này');
-  ANQ={cancel:false}; btn.classList.add('busy'); btn.textContent='DỪNG'; let done=0; const cmp={n:0,same:0,rel:0,adj:0};
+  ANQ={cancel:false}; btn.classList.add('busy'); btn.textContent='DỪNG'; let done=0; const cmp={n:0,same:0,rel:0,adj:0,en:0,esame:0};
   for(const t of todo){ if(ANQ.cancel) break; setProg(`Phân tích ${done+1}/${todo.length}: ${t.title}`);
     try{ const ab=await readTrackFile(t); if(ab){ const buf=await AC.decodeAudioData(ab); if(!t.len) t.len=Math.round(buf.duration);
         const w=await analyzeWave(buf); t.prev=computePrev(w); t._pv=null;
-        if(!t.bpm||(force&&!t.rb)){ const r=detectBpm(w); if(r){ t.bpm=r.bpm; t.tempos=[{t:r.first,bpm:r.bpm,beat:1}]; } }
+        const na=(force||!t.bpm||!t.key)?await nativeAnalyze(t):null;
+        if(na&&na.key&&t.rbKey){ const a=parseKey(na.key), b=parseKey(t.rbKey); if(a&&b){ cmp.en++; if(a.n===b.n&&a.minor===b.minor) cmp.esame++; } }
+        if(!t.bpm||(force&&!t.rb)){ const r=na&&na.bpm?na:detectBpm(w); if(r){ t.bpm=r.bpm; t.tempos=[{t:r.first,bpm:r.bpm,beat:1}]; } }
         if(force||!t.key){ const r=await detectKey(buf); if(r){ if(t.rbKey){ t.myKey=r.key; const a=parseKey(r.key), b=parseKey(t.rbKey); if(a&&b){ cmp.n++; if(a.n===b.n&&a.minor===b.minor) cmp.same++; else if(a.n===b.n) cmp.rel++; else if(keyCompat(r.key,t.rbKey)===1) cmp.adj++; } } else t.key=r.key; } }
         saveAnalysis(t); } }
     catch(e){ log('Lỗi phân tích '+t.file+': '+e.message); }
     done++; renderRows(); drawControls();
   }
   let msg=ANQ.cancel?`Đã dừng — xong ${done}/${todo.length} bài`:`Đã phân tích ${done} bài`;
-  if(cmp.n){ msg=`So với Rekordbox: ${cmp.same}/${cmp.n} trùng (${Math.round(cmp.same/cmp.n*100)}%) · ${cmp.rel} nhầm relative · ${cmp.adj} lệch 1 nấc · ${cmp.n-cmp.same-cmp.rel-cmp.adj} sai`; toast(msg); log(msg); }
+  if(cmp.n){ msg=`So với Rekordbox: ${cmp.same}/${cmp.n} trùng (${Math.round(cmp.same/cmp.n*100)}%) · ${cmp.rel} nhầm relative · ${cmp.adj} lệch 1 nấc · ${cmp.n-cmp.same-cmp.rel-cmp.adj} sai${cmp.en?` · engine C++: ${cmp.esame}/${cmp.en} trùng`:''}`; toast(msg); log(msg); }
   setProg(msg); if(!cmp.n) setTimeout(()=>{ if(!ANQ) setProg(''); },6000);
   ANQ=null; btn.classList.remove('busy'); btn.textContent='PHÂN TÍCH';
 }
@@ -1365,7 +1382,8 @@ async function loadTrack(n,t){
   try{ const ab=await readTrackFile(t); if(!ab) throw new Error('không có quyền đọc file'); const buf=await AC.decodeAudioData(ab); if(d.track!==t) return;
     d.buffer=buf; d.wave=await analyzeWave(buf); if(!t.len) t.len=Math.round(buf.duration); applyAnalysis(t);
     let changed=false; if(!t.prev){ t.prev=computePrev(d.wave); t._pv=null; changed=true; }
-    if(!t.bpm){ const r=detectBpm(d.wave); if(r){ t.bpm=r.bpm; t.tempos=[{t:r.first,bpm:r.bpm,beat:1}]; changed=true; toast(`Phân tích: ${r.bpm.toFixed(2)} BPM`); } }
+    const na=!t.bpm?await nativeAnalyze(t):null; if(d.track!==t) return;
+    if(!t.bpm){ const r=na&&na.bpm?na:detectBpm(d.wave); if(r){ t.bpm=r.bpm; t.tempos=[{t:r.first,bpm:r.bpm,beat:1}]; changed=true; toast(`Phân tích: ${r.bpm.toFixed(2)} BPM`); } }
     if(changed) saveAnalysis(t);
     d.cue=firstBeat(t); d.pos=d.cue; d.loading=false; drawDeckInfo(n);
     if(!t.key) detectKey(buf).then(r=>{ if(!r) return; t.key=r.key; saveAnalysis(t); renderRows(); drawControls(); toast(`Key "${t.title}": ${fmtKey(t.key)}`); }).catch(e=>log('Lỗi phân tích key: '+e.message));
@@ -1433,7 +1451,13 @@ document.addEventListener('pointerdown',e=>{ if(MENU&&!MENU.contains(e.target)) 
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeMenu(); });
 const anchorOf=(ctl,deck)=>document.querySelector(`[data-ctl="${ctl}"]${deck?`[data-deck="${deck}"]`:''}`);
 function setLoopBeats(n,beats){ const d=D[n]; d.loopBeats=beats; if(!d.loop||!d.track) return; const per=60/(d.track.bpm||120), a=d.loop.a, b=a+beats*per, p=d.curPos(); d.setLoop(a,b); if(p>=b) d.seek(a+((p-a)%(b-a))); }
+// PITCH BEND buttons: a tap is a fine nudge (0.6 %), holding makes it stronger (up to 4 % after ~2 s) — like nudging a CDJ jog
+const BEND={min:.006,max:.04,ramp:.017};
+function bendKey(d,dir){ if(dir&&d.bendDir===dir) return; d.bendDir=dir; d.bendT=performance.now(); d.bend=dir*BEND.min; d.setRate(); }
+function bendTick(){ const now=performance.now(); for(const n of [1,2]){ const d=D[n]; if(!d.bendDir) continue;
+  const b=d.bendDir*Math.min(BEND.max,BEND.min+(now-d.bendT)/1000*BEND.ramp); if(Math.abs(b-d.bend)>=.001){ d.bend=b; d.setRate(); } } }
 function act(name, deck, pressed, value, ev){
+  if(pressed) dbg(`act ${name}${deck?' '+deck:''}${value!=null?' v='+value:''}`);
   const d=D[deck]; if(pressed) flash(name,deck);
   const fm=name.match(/^fx([12])(on|l|t|b|ch|rel|rb|auto|tap|m)(\d)?$/);
   if(fm){ const U=FXU[+fm[1]], k=fm[2], i=+fm[3], s=U.slots[i];
@@ -1474,8 +1498,8 @@ function act(name, deck, pressed, value, ev){
     case 'xa': if(pressed){ S.xa[deck]=!S.xa[deck]; if(S.xa[deck]) S.xb[deck]=false; } break;
     case 'xb': if(pressed){ S.xb[deck]=!S.xb[deck]; if(S.xb[deck]) S.xa[deck]=false; } break;
     case 'sync': if(pressed) doSync(deck); break;
-    case 'pbUp': d.bend = pressed? .04:0; d.setRate(); break;
-    case 'pbDown': d.bend = pressed? -.04:0; d.setRate(); break;
+    case 'pbUp': bendKey(d,pressed?1:0); break;
+    case 'pbDown': bendKey(d,pressed?-1:0); break;
     case 'load': if(pressed) loadTo(deck); break;
     case 'gridL': if(pressed) nudgeGrid(deck,-.005); break;
     case 'gridR': if(pressed) nudgeGrid(deck,+.005); break;
@@ -1494,11 +1518,34 @@ function act(name, deck, pressed, value, ev){
 
 // ═══════════ MIDI ═══════════
 const logEl=document.getElementById('log'); const logs=[];
-function log(s){ logs.unshift(s); logs.length=Math.min(logs.length,2); logEl.textContent=logs.join('   ·   '); }
+// ── debug: everything that happened, ready to copy into a bug report ──
+function dbg(s){ const t=((performance.now()-DBG.t0)/1000).toFixed(2); DBG.lines.push(`${t.padStart(8)}  ${s}`); if(DBG.lines.length>400) DBG.lines.splice(0,100); nativeLog(s); }
+function nativeLog(s){ if(window.__TAURI__) window.__TAURI__.core.invoke('log_write',{msg:s}).catch(()=>{}); }   // the app also writes to picodj.log
+async function nativeLogTail(){ if(!window.__TAURI__) return ''; const I=window.__TAURI__.core.invoke; return 'file: '+await I('log_path')+' · engine '+await I('engine_version')+'\n'+await I('log_tail'); }
+async function debugText(){ const L=[]; const d=n=>{ const x=D[n], t=x.track; return `deck${n}: ${t?`"${t.title}" ${t.bpm?t.bpm.toFixed(2):'?'}bpm key ${t.key||'?'} first ${t.tempos&&t.tempos[0]?t.tempos[0].t.toFixed(3):'?'}`:'(trống)'} | ${x.playing?'PLAY':'stop'} pos ${x.curPos? (AC?x.curPos():x.pos).toFixed(2):0} tempo ${x.tempo.toFixed(2)}% ±${x.range} rate ${x.rate().toFixed(4)} sync ${x.sync} mt ${x.mt} slip ${x.slip} keyShift ${x.keyShift} loop ${x.loop?x.loop.a.toFixed(2)+'-'+x.loop.b.toFixed(2):'-'} pad ${x.padMode}`; };
+  L.push('PicoDJ '+(document.querySelector('.gsel small')||{}).textContent+' · '+new Date().toISOString());
+  L.push(navigator.userAgent);
+  L.push(`màn hình ${innerWidth}x${innerHeight} dpr ${devicePixelRatio}`);
+  L.push(AC?`audio ${AC.state} ${AC.sampleRate}Hz base ${((AC.baseLatency||0)*1000).toFixed(1)}ms out ${((AC.outputLatency||0)*1000).toFixed(1)}ms · worklet ${WK_READY}`:'audio: chưa tạo '+audioErr);
+  L.push('MIDI: '+document.getElementById('miditxt').textContent+' | '+(document.getElementById('midipill').title||'').replace(/\n/g,', '));
+  L.push(d(1)); L.push(d(2));
+  L.push(`mixer: master deck ${S.master} xfader ${S.ctl.xfader} cfx ${cfxType()} ${S.cfxOn?'on':'off'} | FX1 ${FXU[1].slots.map(s=>s.type+(s.on?'*':'')).join(',')} → ${FXU[1].assign} | FX2 ${FXU[2].slots.map(s=>s.type+(s.on?'*':'')).join(',')} → ${FXU[2].assign}`);
+  L.push(`thư viện: ${LIB.tracks.length} bài XML · ${FILES.size} file · list ${S.list}`);
+  L.push('', '── MIDI gần nhất ──', ...(DBG.midi.length?DBG.midi:['(chưa nhận gì)']), '', '── nhật ký phiên này ──', ...DBG.lines.slice(-150));
+  const nt=await nativeLogTail().catch(()=>''); if(nt) L.push('', '── picodj.log ──', nt);
+  return L.join('\n'); }
+async function showDebug(){ let el=document.getElementById('dbgpanel');
+  if(!el){ el=document.createElement('div'); el.id='dbgpanel'; el.innerHTML='<div class="dbgbox"><div class="dbgbar"><b>THÔNG TIN GỠ LỖI</b><span style="flex:1"></span><button class="btn" id="dbgcopy">SAO CHÉP TẤT CẢ</button><button class="btn" id="dbgrefresh">LÀM MỚI</button><button class="btn" id="dbgclose">ĐÓNG</button></div><textarea id="dbgout" readonly spellcheck="false"></textarea><div class="hint">Khi gặp lỗi: bấm SAO CHÉP TẤT CẢ rồi dán vào tin nhắn gửi cho người làm app.</div></div>'; stage.appendChild(el);
+    el.querySelector('#dbgclose').addEventListener('click',()=>el.hidden=true);
+    el.querySelector('#dbgrefresh').addEventListener('click',showDebug);
+    el.querySelector('#dbgcopy').addEventListener('click',async()=>{ const ta=el.querySelector('#dbgout'); let ok=false; try{ await navigator.clipboard.writeText(ta.value); ok=true; }catch(e){ ta.focus(); ta.select(); try{ ok=document.execCommand('copy'); }catch(e2){} } toast(ok?'Đã sao chép — dán vào tin nhắn để gửi':'Không sao chép được, hãy bôi đen và copy thủ công'); }); }
+  el.hidden=false; const ta=el.querySelector('#dbgout'); ta.value=await debugText(); ta.scrollTop=0; }
+document.getElementById('dbgbtn').addEventListener('click',showDebug);
+function log(s){ dbg('LOG '+s); logs.unshift(s); logs.length=Math.min(logs.length,2); logEl.textContent=logs.join('   ·   '); }
 let toastT; function toast(s){ const t=document.getElementById('toast'); t.textContent=s; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2600); }
 function flash(name,deck){ const el=document.querySelector(`[data-ctl="${name}"]${deck?`[data-deck="${deck}"]`:''}`); if(!el) return; el.classList.add('press'); setTimeout(()=>el.classList.remove('press'),120); }
 const lastOn={}, pendingOff={};
-function onMidi(e){
+function onMidi(e){ { const b=e.data; DBG.midi.push(((performance.now()-DBG.t0)/1000).toFixed(2).padStart(8)+'  '+[...b].map(x=>x.toString(16).padStart(2,'0')).join(' ')); if(DBG.midi.length>40) DBG.midi.shift(); }
   const [st,d1,d2]=e.data; const type=st&0xF0;
   if(type===0x90||type===0x80){ const pressed = type===0x90 && d2>0; const m=MAP.notes[d1]; const now=performance.now();
     if(pressed){ if(now-(lastOn[d1]||0)<60){ log(`Note ${d1} bị dội (bounce) — bỏ qua`); return; } lastOn[d1]=now; clearTimeout(pendingOff[d1]); }
@@ -1559,7 +1606,7 @@ addEventListener('resize',fit);
 let frame=0;
 function tick(){ frame++;
   for(const n of [1,2]){ const d=D[n]; if(d.playing||d.loading||frame%10===0) drawWave(n); }
-  drawMeters(); drawJogs(); gateTick();
+  drawMeters(); drawJogs(); gateTick(); bendTick();
   if(frame%30===0){ audioStatus(); const r=refDeck(), rk=r?r.track.key||null:null; if(rk!==S.refShown) renderRows(); }
   if(frame%6===0){ drawControls(); syncLeds(); const t=new Date(); document.getElementById('mclock').textContent=`${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`; }
   requestAnimationFrame(tick);

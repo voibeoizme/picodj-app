@@ -2339,8 +2339,9 @@ dependencies = [
 
 [[package]]
 name = "picodj"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
+ "cc",
  "midir",
  "serde",
  "serde_json",

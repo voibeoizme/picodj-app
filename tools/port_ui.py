@@ -9,7 +9,7 @@ def R(a,b,count=1):
 src='<!doctype html>\n<html lang="vi">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">\n'+src
 R('</style>\n','</style>\n</head>\n<body>\n')
 src=src.rstrip()+'\n</body>\n</html>\n'
-R('<small>PicoDJ v0.6.1</small>','<small>PicoDJ v0.8</small>')
+R('<small>PicoDJ v0.6.1</small>','<small>PicoDJ v0.9</small>')
 R('__LIBRARY__','{"tracks":[],"playlists":[]}')
 # ── native layer: folders + files ──
 R("""async function pickFolder(){ ensureAudio();
@@ -73,6 +73,14 @@ R("toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playl
   "toast(`Đã import ${data.tracks.length} bài, ${data.playlists.length} playlist${TAURI?' · phát thẳng từ đường dẫn trong XML':FILES.size?` · ${n} bài có file trong thư mục nhạc`:' — chọn THƯ MỤC NHẠC để phát được'}`);")
 R("return toast(FILES.size?`Không thấy file \"${t.file}\" trong thư mục đã chọn`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');",
   "return toast(FILES.size||TAURI?`Không thấy file \"${t.file}\" — thêm thư mục chứa nó hoặc kéo file vào app`:'Chưa có file nhạc — chọn THƯ MỤC NHẠC hoặc kéo file vào waveform');")
+# ── C++ engine: analysis + log file ──
+R("async function nativeAnalyze(t){ return null; }",
+  """async function nativeAnalyze(t){ if(!TAURI) return null; const f=FILES.get(t.file.toLowerCase()), path=f instanceof DiskFile?f.path:(!ANDROID&&t.path)||null; if(!path) return null;
+  try{ if(!await inv('engine_can_decode',{path})) return null; const r=await inv('analyze_file',{path});
+    dbg(`engine: ${r.bpm.toFixed(2)} BPM first ${r.first.toFixed(3)} conf ${r.confidence.toFixed(2)} key ${r.key} (${r.key_strength.toFixed(2)}) ${Math.round(r.ms)}ms — ${t.file}`);
+    return r.bpm>0&&r.confidence>=.5?r:{...r,bpm:0}; }catch(e){ dbg('engine analyze lỗi: '+e); return null; } }""")
+R("function nativeLog(s){}","function nativeLog(s){ if(window.__TAURI__) window.__TAURI__.core.invoke('log_write',{msg:s}).catch(()=>{}); }")
+R("async function nativeLogTail(){ return ''; }","async function nativeLogTail(){ if(!window.__TAURI__) return ''; const I=window.__TAURI__.core.invoke; return 'file: '+await I('log_path')+' · engine '+await I('engine_version')+'\\n'+await I('log_tail'); }")
 # ── MIDI through Rust (all ports, hot-plug), LED feedback out ──
 R("""async function connectMidi(){ ensureAudio();
   if(!navigator.requestMIDIAccess)""","""async function connectMidi(){ ensureAudio();

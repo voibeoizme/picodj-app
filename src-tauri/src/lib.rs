@@ -138,6 +138,172 @@ async fn import_file(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result
     Ok(dest.to_string_lossy().into_owned())
 }
 
+// ───────────────────────── log file ─────────────────────────
+// Everything worth knowing for a bug report goes to <app data>/picodj.log: engine messages, JS errors, button presses.
+mod logfile {
+    use std::fs::{File, OpenOptions};
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LOG: OnceLock<Mutex<(PathBuf, Option<File>)>> = OnceLock::new();
+
+    pub fn init(dir: PathBuf) {
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("picodj.log");
+        // keep the previous session, start fresh when the file gets big
+        if std::fs::metadata(&path).map(|m| m.len() > 1_500_000).unwrap_or(false) {
+            let _ = std::fs::rename(&path, dir.join("picodj.old.log"));
+        }
+        let file = OpenOptions::new().create(true).append(true).open(&path).ok();
+        let _ = LOG.set(Mutex::new((path, file)));
+    }
+
+    pub fn path() -> String {
+        LOG.get().map(|l| l.lock().unwrap().0.to_string_lossy().into_owned()).unwrap_or_default()
+    }
+
+    pub fn write(src: &str, msg: &str) {
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let (h, m, s) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
+        let line = format!("{h:02}:{m:02}:{s:02}Z [{src}] {msg}\n");
+        if let Some(l) = LOG.get() {
+            if let Some(f) = l.lock().unwrap().1.as_mut() {
+                let _ = f.write_all(line.as_bytes());
+                return;
+            }
+        }
+        eprint!("{line}");
+    }
+
+    /// The last `max` bytes of the log.
+    pub fn tail(max: usize) -> String {
+        let p = path();
+        let data = std::fs::read(&p).unwrap_or_default();
+        let from = data.len().saturating_sub(max);
+        String::from_utf8_lossy(&data[from..]).into_owned()
+    }
+}
+
+#[tauri::command]
+fn log_write(msg: String) {
+    logfile::write("ui", &msg);
+}
+
+#[tauri::command]
+fn log_tail() -> String {
+    logfile::tail(60_000)
+}
+
+#[tauri::command]
+fn log_path() -> String {
+    logfile::path()
+}
+
+// ───────────────────────── C++ engine ─────────────────────────
+mod engine {
+    use serde::Serialize;
+    use std::ffi::{c_char, c_int, c_void, CStr, CString};
+
+    #[repr(C)]
+    struct PdjAnalysis {
+        duration: f64,
+        sample_rate: c_int,
+        channels: c_int,
+        bpm: f64,
+        first_beat: f64,
+        confidence: f64,
+        n_beats: c_int,
+        key: c_int,
+        camelot: [c_char; 4],
+        key_strength: f64,
+        ms_decode: f64,
+        ms_beats: f64,
+        ms_key: f64,
+    }
+
+    extern "C" {
+        fn pdj_analyze_file(path: *const c_char, out: *mut PdjAnalysis, err: *mut c_char, err_len: c_int) -> c_int;
+        fn pdj_can_decode(path: *const c_char) -> c_int;
+        fn pdj_version() -> *const c_char;
+        fn pdj_set_log(f: Option<extern "C" fn(c_int, *const c_char, *mut c_void)>, user: *mut c_void);
+    }
+
+    extern "C" fn on_log(level: c_int, msg: *const c_char, _user: *mut c_void) {
+        if msg.is_null() {
+            return;
+        }
+        let text = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
+        let src = match level {
+            0 => "engine debug",
+            2 => "engine warn",
+            3 => "engine ERROR",
+            _ => "engine",
+        };
+        super::logfile::write(src, &text);
+    }
+
+    pub fn init() {
+        unsafe { pdj_set_log(Some(on_log), std::ptr::null_mut()) };
+        super::logfile::write("app", &format!("PicoDJ {} · engine {} · {} {}", env!("CARGO_PKG_VERSION"), version(), std::env::consts::OS, std::env::consts::ARCH));
+    }
+
+    pub fn version() -> String {
+        unsafe { CStr::from_ptr(pdj_version()) }.to_string_lossy().into_owned()
+    }
+
+    #[derive(Serialize)]
+    pub struct Analysis {
+        pub bpm: f64,
+        pub first: f64,
+        pub confidence: f64,
+        pub key: String,
+        pub key_strength: f64,
+        pub duration: f64,
+        pub ms: f64,
+    }
+
+    pub fn can_decode(path: &str) -> bool {
+        CString::new(path).map(|c| unsafe { pdj_can_decode(c.as_ptr()) } != 0).unwrap_or(false)
+    }
+
+    pub fn analyze(path: &str) -> Result<Analysis, String> {
+        let c = CString::new(path).map_err(|e| e.to_string())?;
+        let mut out: PdjAnalysis = unsafe { std::mem::zeroed() };
+        let mut err = [0 as c_char; 256];
+        let rc = unsafe { pdj_analyze_file(c.as_ptr(), &mut out, err.as_mut_ptr(), err.len() as c_int) };
+        if rc != 0 {
+            return Err(unsafe { CStr::from_ptr(err.as_ptr()) }.to_string_lossy().into_owned());
+        }
+        Ok(Analysis {
+            bpm: out.bpm,
+            first: out.first_beat,
+            confidence: out.confidence,
+            key: unsafe { CStr::from_ptr(out.camelot.as_ptr()) }.to_string_lossy().into_owned(),
+            key_strength: out.key_strength,
+            duration: out.duration,
+            ms: out.ms_decode + out.ms_beats + out.ms_key,
+        })
+    }
+}
+
+/// BPM, beat grid and key of one file, computed by the C++ engine on a background thread.
+#[tauri::command]
+async fn analyze_file(path: String) -> Result<engine::Analysis, String> {
+    tauri::async_runtime::spawn_blocking(move || engine::analyze(&path)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn engine_can_decode(path: String) -> bool {
+    engine::can_decode(&path)
+}
+
+#[tauri::command]
+fn engine_version() -> String {
+    engine::version()
+}
+
 // ───────────────────────── MIDI ─────────────────────────
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod midi {
@@ -256,6 +422,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(midi::Midi::default())
         .setup(|app| {
+            if let Ok(dir) = app.path().app_data_dir() {
+                logfile::init(dir);
+            }
+            engine::init();
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title(&format!("PicoDJ {}", app.package_info().version));
             }
@@ -268,6 +438,12 @@ pub fn run() {
             read_text,
             file_exists,
             music_dir,
+            log_write,
+            log_tail,
+            log_path,
+            analyze_file,
+            engine_can_decode,
+            engine_version,
             import_file,
             midi::midi_connect_all,
             midi::midi_send
